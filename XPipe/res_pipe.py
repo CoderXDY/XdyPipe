@@ -8,11 +8,11 @@ import torch.nn.functional as F
 import torch.optim as optim
 import logging as Log
 import time
-from res_pipe import *
+from res import BasicBlock, Bottleneck, ResInputLayer, ResBlockLayer, ResOutputLayer
 import torchvision
 import torchvision.transforms as transforms
 from utils import progress_bar
-
+import traceback
 
 
 
@@ -20,7 +20,7 @@ from utils import progress_bar
 def run(queue, layer, stop_flag, loader=None, target_buffer=None):
 
     batch_size = 128
-    iter = 0
+    batch_count = 0
     train_loss = 0
     try:
         while stop_flag.value == 0:
@@ -68,11 +68,10 @@ def run(queue, layer, stop_flag, loader=None, target_buffer=None):
                 queue.put(rec_val)
 
                 output_v = layer(rec_val)
-
                 send_opt = dist.isend(tensor=output_v, dst=4)
                 send_opt.wait()
             elif dist.get_rank() == 4:
-                rec_val = torch.zeros([batch_size, 128, 8, 8], requires_grad=True)
+                rec_val = torch.zeros([batch_size, 256, 8, 8], requires_grad=True)
                 dist.recv(tensor=rec_val, src=3)
                 rec_val.share_memory_()
                 queue.put(rec_val)
@@ -82,7 +81,7 @@ def run(queue, layer, stop_flag, loader=None, target_buffer=None):
                 send_opt = dist.isend(tensor=output_v, dst=5)
                 send_opt.wait()
             elif dist.get_rank() == 5:
-                rec_val = torch.zeros([batch_size, 128, 4, 4], requires_grad=True)
+                rec_val = torch.zeros([batch_size, 512, 4, 4], requires_grad=True)
                 dist.recv(tensor=rec_val, src=4)
                 rec_val.share_memory_()
                 queue.put(rec_val)
@@ -101,16 +100,17 @@ def run(queue, layer, stop_flag, loader=None, target_buffer=None):
 
                 optimizer.zero_grad()
 
-                criterion = nn.MSELoss()
-
+               # criterion = nn.MSELoss()
+                criterion = nn.CrossEntropyLoss()
                 target_v = target_buffer.get()
+                #output_v = output_v.long()
                 loss = criterion(output_v, target_v)
                 loss.backward()
 
                 optimizer.step()
 
                 #train_loss += loss.item()
-                print(loss)
+               # print("loss:" + str(loss.item()))
                 #_, predicted = outputs.max(1)
                 #total += targets.size(0)
                 #correct += predicted.eq(targets).sum().item()
@@ -123,19 +123,22 @@ def run(queue, layer, stop_flag, loader=None, target_buffer=None):
 
 
             elif dist.get_rank() == 7:
-                back_grad = torch.zeros([batch_size, 128, 4, 4], requires_grad=True)
+                back_grad = torch.zeros([batch_size, 512, 4, 4], requires_grad=True)
                 dist.recv(tensor=back_grad, src=6)
                 input_v = queue.get()
                 input_v.requires_grad_()
                 output_v = layer(input_v)
-
+     
                 optimizer = optim.SGD(layer.parameters(), lr=0.01)
                 optimizer.zero_grad()
                 output_v.backward(back_grad)
                 optimizer.step()
+                send_opt = dist.isend(tensor=input_v.grad, dst=8)
+                send_opt.wait()
+
 
             elif dist.get_rank() == 8:
-                back_grad = torch.zeros([batch_size, 128, 8, 8], requires_grad=True)
+                back_grad = torch.zeros([batch_size, 256, 8, 8], requires_grad=True)
                 dist.recv(tensor=back_grad, src=7)
                 input_v = queue.get()
                 input_v.requires_grad_()
@@ -145,6 +148,9 @@ def run(queue, layer, stop_flag, loader=None, target_buffer=None):
                 optimizer.zero_grad()
                 output_v.backward(back_grad)
                 optimizer.step()
+                send_opt = dist.isend(tensor=input_v.grad, dst=9)
+                send_opt.wait()
+
 
             elif dist.get_rank() == 9:
                 back_grad = torch.zeros([batch_size, 128, 16, 16], requires_grad=True)
@@ -157,6 +163,9 @@ def run(queue, layer, stop_flag, loader=None, target_buffer=None):
                 optimizer.zero_grad()
                 output_v.backward(back_grad)
                 optimizer.step()
+                send_opt = dist.isend(tensor=input_v.grad, dst=10)
+                send_opt.wait()
+
             elif dist.get_rank() == 10:
                 back_grad = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
                 dist.recv(tensor=back_grad, src=9)
@@ -168,13 +177,20 @@ def run(queue, layer, stop_flag, loader=None, target_buffer=None):
                 optimizer.zero_grad()
                 output_v.backward(back_grad)
                 optimizer.step()
+                send_opt = dist.isend(tensor=input_v.grad, dst=11)
+                send_opt.wait()
+
             elif dist.get_rank() == 11:
                 back_grad = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
                 dist.recv(tensor=back_grad, src=10)
-                if iter == 200:
+                print("rank" + str(dist.get_rank()) + " runing")
+                if batch_count == 5:
                     stop_flag.value = 1
+                    print("set stop.....")
                 else:
+                    print("batch_count:" + str(batch_count))
                     input_v = queue.get()
+                    print("input_v")
                     input_v.requires_grad_()
                     output_v = layer(input_v)
 
@@ -182,9 +198,11 @@ def run(queue, layer, stop_flag, loader=None, target_buffer=None):
                     optimizer.zero_grad()
                     output_v.backward(back_grad)
                     optimizer.step()
-            iter += 1
+            batch_count += 1
+        print("rank" + str(dist.get_rank()) + "is stop")
     except Exception as e:
-        print(e)
+        #traceback.print_exc()
+        traceback.format_exc()
         return
 
 
@@ -193,7 +211,7 @@ def run(queue, layer, stop_flag, loader=None, target_buffer=None):
 def init_processes(fn, path, size, buffer_queues, layers, target_buffer, rank, stop_flag, trainloader):
     dist.init_process_group(backend='tcp', init_method=path, world_size=size, rank=rank)
     if rank == 0:
-        fn(target_buffer[0], layers[0], stop_flag, loader=trainloader)
+        fn(buffer_queues[0], layers[0], stop_flag, loader=trainloader,target_buffer=target_buffer)
     elif rank == 6:
         fn(buffer_queues[5], layers[5], stop_flag, target_buffer=target_buffer)
     else:
@@ -268,10 +286,10 @@ if __name__ == "__main__":
     ])
 
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=False, transform=transform_train)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=2)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=1)
 
-    testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform_test)
-    testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
+#    testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=False, transform=transform_test)
+ #   testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
 
     classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
