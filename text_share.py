@@ -13,7 +13,7 @@ import time
 
 
 
-toy_expand_pipeline.py -------(precomputing strategy)------- expend_precomputing_pipeline.py
+test some trait and code
 
 .....
 use queue comunication.....
@@ -151,6 +151,7 @@ if __name__ == "__main__":
     qs.append(q1)
 
     layers = []
+
 
     layer03 = Layer(20, 10)
     layer03.share_memory()

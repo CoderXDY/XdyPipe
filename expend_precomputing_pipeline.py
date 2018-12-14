@@ -15,7 +15,8 @@ import time
 
 toy_expand_pipeline.py -------(precomputing strategy)------- expend_precomputing_pipeline.py
 
-
+.....
+use queue comunication.....
 
 """
 
@@ -73,11 +74,11 @@ def run(layer, size, batcher, stop_flag):
         while stop_flag.value == 0:
             print("rank" + str(dist.get_rank()) + "-" + str(iter) + " start.....")
             if dist.get_rank() == 0:
-                input_data = batcher.batch()
-                input_v = V(input_data)
+                input_v = batcher.batch()
                 output_v = layer(input_v)
-                send_val = output_v.data
-                send_opt = dist.isend(tensor=send_val, dst=1)
+                output_v.share_memory_()
+                q0.put(output_v)
+                send_opt = dist.isend(tensor=output_v, dst=1)
                 send_opt.wait()
                 print("rank" + str(dist.get_rank()) + " is send.....")
             elif dist.get_rank() == 1:

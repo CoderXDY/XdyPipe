@@ -13,10 +13,7 @@ import time
 
 
 
-toy_expand_pipeline.py -------(precomputing strategy)------- expend_precomputing_pipeline.py
 
-.....
-use queue comunication.....
 
 """
 
@@ -47,10 +44,6 @@ def run(qs, layer):
         send_opt = dist.isend(tensor=output_x, dst=1)
         send_opt.wait()
         time.sleep(20)
-        print("===================rank 0 share=================================")
-        for name, param in layer.named_parameters():
-            print(name + "->")
-            print(param)
     elif dist.get_rank() == 1:
 
         rec_val = torch.zeros(10, requires_grad=True)
@@ -60,22 +53,14 @@ def run(qs, layer):
         send_opt = dist.isend(tensor=torch.ones(1), dst=2)
         send_opt.wait()
         time.sleep(20)
-        print("===================rank 1 share=================================")
-        for name, param in layer.named_parameters():
-            print(name + "->")
-            print(param)
+
     elif dist.get_rank() == 2:
         rec_val = torch.randn(1)
         dist.recv(tensor=rec_val, src=1)
-        print("===================" + str(qs[1].qsize()))
+
         input_x = qs[1].get()
         input_x.requires_grad_()
-        print("input_x:")
-        print(input_x)
-        print("before layer parmeters")
-        for name, param in layer.named_parameters():
-            print(name + "->")
-            print(param)
+
         output_x = layer(input_x)
         optimizer = optim.SGD(layer.parameters(), lr=0.01)
         optimizer.zero_grad()
@@ -85,43 +70,23 @@ def run(qs, layer):
         loss.backward()
 
         optimizer.step()
-        print(loss.grad)
-        print(loss.grad_fn)
-        print(loss.requires_grad)
-        print("-loss: " + str(loss))
 
-        print("-------------------------------------")
-        print(input_x.grad)
-        print(input_x.requires_grad)
-        print("after layer poarmeters")
-        for name, param in layer.named_parameters():
-            print(name + "->")
-            print(param)
         send_opt = dist.isend(tensor=input_x.grad, dst=3)
         send_opt.wait()
         time.sleep(10)
     elif dist.get_rank() == 3:
         back_grad = torch.zeros(10, requires_grad=True)
         dist.recv(tensor=back_grad, src=2)
-        print("back_grad")
-        print(back_grad)
+
         input_x = qs[0].get()
         input_x.requires_grad_()
-        print("rank3 before...........")
-        for name, param in layer.named_parameters():
-            print(name + "->")
-            print(param)
+
         output_x = layer(input_x)
         optimizer = optim.SGD(layer.parameters(), lr=0.01)
         optimizer.zero_grad()
         output_x.backward(back_grad)
         optimizer.step()
-        print("rank3 after...........")
-        for name, param in layer.named_parameters():
-            print(name + "->")
-            print(param)
-        print("rank3")
-        print(input_x.grad)
+
         time.sleep(10)
 
 
