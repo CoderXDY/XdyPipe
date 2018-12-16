@@ -23,17 +23,11 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
     batch_size = 128
     train_loss = 0
     temp_count = 0
-
+    access_stop_flag  = False
     try:
         while True:
 
             if dist.get_rank() == 0:
-
-                if stop_flag.value == 1:
-                    print("rank 0 wait....")
-                    stop_opt = dist.irecv(tensor=torch.zeros(1), src=11)
-                    stop_opt.wait()
-                    break
 
                 if loader is not None:
                     dataiter = iter(loader)
@@ -41,13 +35,15 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
                         temp_count += 1
                         if temp_count > 10:
                             print("test stop.....")
-                            stop_flag.value = 1
+                            #stop_flag.value = 1
+                            dist.send(tensor=torch.zeros(1), dst=1)
                             e.wait()
                             break
                         input_v, target_v = next(dataiter)
                     except StopIteration as stop_e:
                         print("batch iteration end..")
-                        stop_flag.value = 1
+                        #stop_flag.value = 1
+                        dist.send(tensor=torch.zeros(1), dst=1)
                         e.wait()
                         break
                     except Exception as e:
@@ -67,17 +63,14 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
                 else:
                     raise Exception('loader error', "loader is None")
             elif dist.get_rank() == 1:
-
-
-                if stop_flag.value == 1:
+                try:
+                    rec_val = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
+                    dist.recv(tensor=rec_val, src=0)
+                except RuntimeError as error:
                     print("rank 1 wait....")
+                    dist.send(tensor=torch.zeros(1), dst=2)
                     e.wait()
                     break
-
-
-
-                rec_val = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
-                dist.recv(tensor=rec_val, src=0)
                 rec_val.share_memory_()
                 queue.put(rec_val)
 
@@ -87,14 +80,14 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
                 send_opt.wait()
 
             elif dist.get_rank() == 2:
-
-                if stop_flag.value == 1:
-                    print("rank 2 wait")
+                try:
+                    rec_val = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
+                    dist.recv(tensor=rec_val, src=1)
+                except RuntimeError as error:
+                    print("rank 2 wait....")
+                    dist.send(tensor=torch.zeros(1), dst=3)
                     e.wait()
                     break
-
-                rec_val = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
-                dist.recv(tensor=rec_val, src=1)
                 rec_val.share_memory_()
                 queue.put(rec_val)
 
@@ -103,12 +96,14 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
                 send_opt = dist.isend(tensor=output_v, dst=3)
                 send_opt.wait()
             elif dist.get_rank() == 3:
-                if stop_flag.value == 1:
-                    print("rank 3 wait...")
+                try:
+                    rec_val = torch.zeros([batch_size, 128, 16, 16], requires_grad=True)
+                    dist.recv(tensor=rec_val, src=2)
+                except RuntimeError as error:
+                    print("rank 3 wait....")
+                    dist.send(tensor=torch.zeros(1), dst=4)
                     e.wait()
                     break
-                rec_val = torch.zeros([batch_size, 128, 16, 16], requires_grad=True)
-                dist.recv(tensor=rec_val, src=2)
                 rec_val.share_memory_()
                 queue.put(rec_val)
 
@@ -116,12 +111,14 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
                 send_opt = dist.isend(tensor=output_v, dst=4)
                 send_opt.wait()
             elif dist.get_rank() == 4:
-                if stop_flag.value == 1:
-                    print("rank 4 wait.....")
+                try:
+                    rec_val = torch.zeros([batch_size, 256, 8, 8], requires_grad=True)
+                    dist.recv(tensor=rec_val, src=3)
+                except RuntimeError as error:
+                    print("rank 4 wait....")
+                    dist.send(tensor=torch.zeros(1), dst=5)
                     e.wait()
                     break
-                rec_val = torch.zeros([batch_size, 256, 8, 8], requires_grad=True)
-                dist.recv(tensor=rec_val, src=3)
                 rec_val.share_memory_()
                 queue.put(rec_val)
 
@@ -130,159 +127,188 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
                 send_opt = dist.isend(tensor=output_v, dst=5)
                 send_opt.wait()
             elif dist.get_rank() == 5:
-                if stop_flag.value == 1:
-                    print("rank 5 wait...")
+                try:
+                    rec_val = torch.zeros([batch_size, 512, 4, 4], requires_grad=True)
+                    dist.recv(tensor=rec_val, src=4)
+                except RuntimeError as error:
+                    print("rank 5 wait....")
+                    dist.send(tensor=torch.zeros(1), dst=6)
                     e.wait()
                     break
-                rec_val = torch.zeros([batch_size, 512, 4, 4], requires_grad=True)
-                dist.recv(tensor=rec_val, src=4)
                 rec_val.share_memory_()
                 queue.put(rec_val)
 
-                send_opt = dist.isend(tensor=torch.randn(1), dst=6)
+                send_opt = dist.isend(tensor=torch.randn(2), dst=6)
                 send_opt.wait()
             elif dist.get_rank() == 6:
-                if stop_flag.value == 0:
-                    rec_val = torch.zeros(1)
-                    dist.recv(tensor=rec_val, src=5)
-
                 try:
-                    input_v = queue.get(block=True,timeout=2)
-                except Empty as empty:
-                    print("rank 6 wait....")
-                    e.wait()
-                    break
-                input_v.requires_grad_()
-                output_v = layer(input_v)
+                    if not access_stop_flag:
+                        rec_val = torch.zeros(2)
+                        dist.recv(tensor=rec_val, src=5)
+                except RuntimeError as error:
+                    access_stop_flag = True
+                finally:
+                    try:
+                        input_v = queue.get(block=True, timeout=2)
+                    except Empty as empty:
+                        print("rank 6 wait....")
+                        dist.send(tensor=torch.zeros(1), dst=7)
+                        e.wait()
+                        break
+                    input_v.requires_grad_()
+                    output_v = layer(input_v)
 
-                optimizer = optim.SGD(layer.parameters(), lr=0.01)
+                    optimizer = optim.SGD(layer.parameters(), lr=0.01)
 
-                optimizer.zero_grad()
+                    optimizer.zero_grad()
 
-                # criterion = nn.MSELoss()
-                criterion = nn.CrossEntropyLoss()
-                target_v = target_buffer.get()
-                #output_v = output_v.long()
-                loss = criterion(output_v, target_v)
-                loss.backward()
+                    # criterion = nn.MSELoss()
+                    criterion = nn.CrossEntropyLoss()
+                    target_v = target_buffer.get()
+                    #output_v = output_v.long()
+                    loss = criterion(output_v, target_v)
+                    loss.backward()
 
-                optimizer.step()
+                    optimizer.step()
 
-                #train_loss += loss.item()
-                print("loss:" + str(loss.item()))
-                #_, predicted = outputs.max(1)
-                #total += targets.size(0)
-                #correct += predicted.eq(targets).sum().item()
+                    #train_loss += loss.item()
+                    print("loss:" + str(loss.item()))
+                    #_, predicted = outputs.max(1)
+                    #total += targets.size(0)
+                    #correct += predicted.eq(targets).sum().item()
 
-                #progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                #             % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                    #progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                    #             % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
 
-                send_opt = dist.isend(tensor=input_v.grad, dst=7)
-                send_opt.wait()
+                    send_opt = dist.isend(tensor=input_v.grad, dst=7)
+                    send_opt.wait()
 
 
             elif dist.get_rank() == 7:
-                if stop_flag.value == 0:
-                    back_grad = torch.zeros([batch_size, 512, 4, 4], requires_grad=True)
-                    dist.recv(tensor=back_grad, src=6)
                 try:
-                    input_v = queue.get(block=True, timeout=2)
-                    print("rank 7 get the input_V")
-                except Empty as empty:
-                    print("rank 7 wait....")
-                    e.wait()
-                    break
-                input_v.requires_grad_()
-                output_v = layer(input_v)
+                    if not access_stop_flag:
+                        back_grad = torch.zeros([batch_size, 512, 4, 4], requires_grad=True)
+                        dist.recv(tensor=back_grad, src=6)
+                except RuntimeError as error:
+                    access_stop_flag = True
+                finally:
+                    try:
+                        input_v = queue.get(block=True, timeout=2)
+                        print("rank 7 get the input_V")
+                    except Empty as empty:
+                        print("rank 7 wait....")
+                        dist.send(tensor=torch.zeros(1), dst=8)
+                        e.wait()
+                        break
+                    input_v.requires_grad_()
+                    output_v = layer(input_v)
      
-                optimizer = optim.SGD(layer.parameters(), lr=0.01)
-                optimizer.zero_grad()
-                output_v.backward(back_grad)
-                optimizer.step()
-                send_opt = dist.isend(tensor=input_v.grad, dst=8)
-                send_opt.wait()
+                    optimizer = optim.SGD(layer.parameters(), lr=0.01)
+                    optimizer.zero_grad()
+                    output_v.backward(back_grad)
+                    optimizer.step()
+                    send_opt = dist.isend(tensor=input_v.grad, dst=8)
+                    send_opt.wait()
 
 
             elif dist.get_rank() == 8:
-                if stop_flag.value == 0:
-                    back_grad = torch.zeros([batch_size, 256, 8, 8], requires_grad=True)
-                    dist.recv(tensor=back_grad, src=7)
                 try:
-                    input_v = queue.get(block=True, timeout=2)
-                except Empty as empty:
-                    print("rank 8 wait...")
-                    e.wait()
-                    break
-                input_v.requires_grad_()
-                output_v = layer(input_v)
+                    if not access_stop_flag:
+                        back_grad = torch.zeros([batch_size, 256, 8, 8], requires_grad=True)
+                        dist.recv(tensor=back_grad, src=7)
+                except RuntimeError as error:
+                    access_stop_flag = True
+                finally:
+                    try:
+                        input_v = queue.get(block=True, timeout=2)
+                    except Empty as empty:
+                        print("rank 8 wait...")
+                        dist.send(tensor=torch.zeros(1), dst=9)
+                        e.wait()
+                        break
+                    input_v.requires_grad_()
+                    output_v = layer(input_v)
 
-                optimizer = optim.SGD(layer.parameters(), lr=0.01)
-                optimizer.zero_grad()
-                output_v.backward(back_grad)
-                optimizer.step()
-                send_opt = dist.isend(tensor=input_v.grad, dst=9)
-                send_opt.wait()
+                    optimizer = optim.SGD(layer.parameters(), lr=0.01)
+                    optimizer.zero_grad()
+                    output_v.backward(back_grad)
+                    optimizer.step()
+                    send_opt = dist.isend(tensor=input_v.grad, dst=9)
+                    send_opt.wait()
 
 
             elif dist.get_rank() == 9:
-                if stop_flag.value == 0:
-                    back_grad = torch.zeros([batch_size, 128, 16, 16], requires_grad=True)
-                    dist.recv(tensor=back_grad, src=8)
                 try:
-                    input_v = queue.get(block=True, timeout=2)
-                except Empty as empty:
-                    print("rank 9 wait.....")
-                    e.wait()
-                    break
-                input_v.requires_grad_()
-                output_v = layer(input_v)
+                    if not access_stop_flag:
+                        back_grad = torch.zeros([batch_size, 128, 16, 16], requires_grad=True)
+                        dist.recv(tensor=back_grad, src=8)
+                except RuntimeError as error:
+                    access_stop_flag = True
+                finally:
+                    try:
+                        input_v = queue.get(block=True, timeout=2)
+                    except Empty as empty:
+                        print("rank 9 wait.....")
+                        dist.send(tensor=torch.zeros(1), dst=10)
+                        e.wait()
+                        break
+                    input_v.requires_grad_()
+                    output_v = layer(input_v)
 
-                optimizer = optim.SGD(layer.parameters(), lr=0.01)
-                optimizer.zero_grad()
-                output_v.backward(back_grad)
-                optimizer.step()
-                send_opt = dist.isend(tensor=input_v.grad, dst=10)
-                send_opt.wait()
+                    optimizer = optim.SGD(layer.parameters(), lr=0.01)
+                    optimizer.zero_grad()
+                    output_v.backward(back_grad)
+                    optimizer.step()
+                    send_opt = dist.isend(tensor=input_v.grad, dst=10)
+                    send_opt.wait()
 
             elif dist.get_rank() == 10:
-                if stop_flag.value == 0:
-                    back_grad = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
-                    dist.recv(tensor=back_grad, src=9)
                 try:
-                    input_v = queue.get(block=True, timeout=2)
-                except Empty as empty:
-                    print("rank 10 wait....")
-                    e.wait()
-                    break
-                input_v.requires_grad_()
-                output_v = layer(input_v)
+                    if not access_stop_flag:
+                        back_grad = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
+                        dist.recv(tensor=back_grad, src=9)
+                except RuntimeError as error:
+                    access_stop_flag = True
+                finally:
+                    try:
+                        input_v = queue.get(block=True, timeout=2)
+                    except Empty as empty:
+                        print("rank 10 wait....")
+                        dist.send(tensor=torch.zeros(1), dst=11)
+                        e.wait()
+                        break
+                    input_v.requires_grad_()
+                    output_v = layer(input_v)
 
-                optimizer = optim.SGD(layer.parameters(), lr=0.01)
-                optimizer.zero_grad()
-                output_v.backward(back_grad)
-                optimizer.step()
-                send_opt = dist.isend(tensor=input_v.grad, dst=11)
-                send_opt.wait()
+                    optimizer = optim.SGD(layer.parameters(), lr=0.01)
+                    optimizer.zero_grad()
+                    output_v.backward(back_grad)
+                    optimizer.step()
+                    send_opt = dist.isend(tensor=input_v.grad, dst=11)
+                    send_opt.wait()
 
             elif dist.get_rank() == 11:
-                if stop_flag.value == 0:
-                    back_grad = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
-                    dist.recv(tensor=back_grad, src=10)
-
                 try:
-                    input_v = queue.get(block=True, timeout=2)
+                    if not access_stop_flag:
+                        back_grad = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
+                        dist.recv(tensor=back_grad, src=10)
+                except RuntimeError as error:
+                    access_stop_flag = True
+                finally:
+                    try:
+                        input_v = queue.get(block=True, timeout=2)
 
-                except Empty as empty:
-                    print("rank 11 start stop process.....")
-                    e.set()
-                    break
-                input_v.requires_grad_()
-                output_v = layer(input_v)
+                    except Empty as empty:
+                        print("rank 11 start stop process.....")
+                        e.set()
+                        break
+                    input_v.requires_grad_()
+                    output_v = layer(input_v)
 
-                optimizer = optim.SGD(layer.parameters(), lr=0.01)
-                optimizer.zero_grad()
-                output_v.backward(back_grad)
-                optimizer.step()
+                    optimizer = optim.SGD(layer.parameters(), lr=0.01)
+                    optimizer.zero_grad()
+                    output_v.backward(back_grad)
+                    optimizer.step()
         print("rank" + str(dist.get_rank()) + "is stop")
 
     except Exception as e:
