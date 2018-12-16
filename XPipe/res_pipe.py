@@ -13,6 +13,7 @@ import torchvision
 import torchvision.transforms as transforms
 from utils import progress_bar
 import traceback
+from queue import Empty
 
 
 
@@ -36,7 +37,6 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
 
                 if loader is not None:
                     dataiter = iter(loader)
-
                     try:
                         temp_count += 1
                         if temp_count > 10:
@@ -50,6 +50,10 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
                         stop_flag.value = 1
                         e.wait()
                         break
+                    except Exception as e:
+                       traceback.format_exc()
+                       print("dataiter error.....")
+                       continue
 
                     input_v.share_memory_()
                     queue.put(input_v)
@@ -143,7 +147,7 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
                     dist.recv(tensor=rec_val, src=5)
 
                 try:
-                    input_v = queue.get(True, 3)
+                    input_v = queue.get(block=True,timeout=2)
                 except Empty as empty:
                     print("rank 6 wait....")
                     e.wait()
@@ -182,7 +186,8 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
                     back_grad = torch.zeros([batch_size, 512, 4, 4], requires_grad=True)
                     dist.recv(tensor=back_grad, src=6)
                 try:
-                    input_v = queue.get(True, 3)
+                    input_v = queue.get(block=True, timeout=2)
+                    print("rank 7 get the input_V")
                 except Empty as empty:
                     print("rank 7 wait....")
                     e.wait()
@@ -203,7 +208,7 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
                     back_grad = torch.zeros([batch_size, 256, 8, 8], requires_grad=True)
                     dist.recv(tensor=back_grad, src=7)
                 try:
-                    input_v = queue.get(True, 3)
+                    input_v = queue.get(block=True, timeout=2)
                 except Empty as empty:
                     print("rank 8 wait...")
                     e.wait()
@@ -224,7 +229,7 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
                     back_grad = torch.zeros([batch_size, 128, 16, 16], requires_grad=True)
                     dist.recv(tensor=back_grad, src=8)
                 try:
-                    input_v = queue.get()
+                    input_v = queue.get(block=True, timeout=2)
                 except Empty as empty:
                     print("rank 9 wait.....")
                     e.wait()
@@ -244,7 +249,7 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
                     back_grad = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
                     dist.recv(tensor=back_grad, src=9)
                 try:
-                    input_v = queue.get(True, 3)
+                    input_v = queue.get(block=True, timeout=2)
                 except Empty as empty:
                     print("rank 10 wait....")
                     e.wait()
@@ -265,7 +270,7 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
                     dist.recv(tensor=back_grad, src=10)
 
                 try:
-                    input_v = queue.get(True, 3)
+                    input_v = queue.get(block=True, timeout=2)
 
                 except Empty as empty:
                     print("rank 11 start stop process.....")
@@ -289,6 +294,7 @@ def run(queue, layer, stop_flag, e, loader=None, target_buffer=None):
 
 
 def init_processes(fn, path, size, buffer_queues, layers, target_buffer, rank, stop_flag, e, trainloader):
+    print("init process-" + str(rank) + "...." )
     dist.init_process_group(backend='tcp', init_method=path, world_size=size, rank=rank)
     if rank == 0:
         fn(buffer_queues[0], layers[0], stop_flag, e, loader=trainloader,target_buffer=target_buffer)
