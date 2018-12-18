@@ -517,10 +517,10 @@ def run(queue, layer, e, train_loader=None, test_loader=None, target_buffer=None
         print("train iter-" + str(epoch))
         layer.train()
         train(queue, layer, e, train_loader, target_buffer)
-        print("test iter-" + str(epoch))
-        layer.eval()
-        with torch.no_grad():
-            test(queue, layer, e, test_loader, target_buffer)
+        #print("test iter-" + str(epoch))
+        #layer.eval()
+        #with torch.no_grad():
+            #test(queue, layer, e, test_loader, target_buffer)
 
 
 def init_processes(fn, path, size, buffer_queues, layers, target_buffer, rank, e, trainloader, testloader):
