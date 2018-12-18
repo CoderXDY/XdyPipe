@@ -178,7 +178,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     optimizer.step()
 
                     all_loss += loss.item()
-                    print("train-loss:" + str(loss.item()))
+                    print(str(dist.get_rank()) + "-train-loss:" + str(loss.item()))
                     _, predicted = output_v.max(1)
                     total += target_v.size(0)
                     correct += predicted.eq(target_v).sum().item()
@@ -469,7 +469,7 @@ def test(queue, layer, e, loader=None, target_buffer=None):
                     target_v = target_buffer.get()
                     batch_idx += 1
                     loss = criterion(output_v, target_v)
-                    print("test-loss:" + str(loss.item()))
+                    print(str(dist.get_rank()) + "-test-loss:" + str(loss.item()))
                     all_loss += loss.item()
                     _, predicted = output_v.max(1)
                     total += target_v.size(0)
