@@ -506,26 +506,18 @@ def test(queue, layer, e, loader=None, target_buffer=None):
 
 
 def run(queue, layer, e, train_loader=None, test_loader=None, target_buffer=None):
-    """
+
     for epoch in range(200):
         print("train iter-" + str(epoch))
         e.clear()
         layer.train()
         train(queue, layer, e, train_loader, target_buffer)
-        print("test iter-" + str(epoch))
-        e.clear()
-        layer.eval()
-        with torch.no_grad():
-            test(queue, layer, e, test_loader, target_buffer)
-    """
-    e.clear()
-    layer.train()
-    train(queue, layer, e, train_loader, target_buffer)
-    print("before test..........")
-    e.clear()
-    layer.eval()
-    with torch.no_grad():
-        test(queue, layer, e, test_loader, target_buffer)
+        #print("test iter-" + str(epoch))
+        #e.clear()
+        #layer.eval()
+        #with torch.no_grad():
+         #   test(queue, layer, e, test_loader, target_buffer)
+
 
 def init_processes(fn, path, size, buffer_queues, layers, target_buffer, rank, e, trainloader, testloader):
     print("init process-" + str(rank) + "...." )
