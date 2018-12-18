@@ -27,51 +27,46 @@ def train(queue, layer, e, loader=None, target_buffer=None):
     total = 0
     correct = 0
 
-    temp_count = 0
+    epoch = 0
 
     access_stop_flag = False
 
-    if dist.get_rank() == 0:
-        e.clear()
-
+    # if dist.get_rank() == 0:
+    #     e.clear()
+    if loader is not None and dist.get_rank() == 0:
+        data_iter = iter(loader)
     try:
         while True:
 
             if dist.get_rank() == 0:
+                try:
 
-                if loader is not None:
-                    dataiter = iter(loader)
-                    try:
-                        temp_count += 1
-                        if temp_count > 10:
-                            print("test stop.....")
-                            #stop_flag.value = 1
-                            dist.send(tensor=torch.zeros(1), dst=1)
-                            e.wait()
-                            break
-                        input_v, target_v = next(dataiter)
-                    except StopIteration as stop_e:
+                    input_v, target_v = next(data_iter)
+                except StopIteration as stop_e:
+                    if epoch < 2:
+                        print("epoch-" + str(epoch) + " end....")
+                        epoch += 1
+                        data_iter = iter(loader)
+                        continue
+                    else:
                         print("batch iteration end..")
-                        #stop_flag.value = 1
                         dist.send(tensor=torch.zeros(1), dst=1)
                         e.wait()
                         break
-                    except Exception as e:
-                       traceback.format_exc()
-                       print("dataiter error.....")
-                       continue
+                except Exception as e:
+                    traceback.format_exc()
+                    print("dataiter error.....")
+                    continue
 
-                    input_v.share_memory_()
-                    queue.put(input_v)
+                input_v.share_memory_()
+                queue.put(input_v)
 
-                    target_v.share_memory_()
-                    target_buffer.put(target_v)
+                target_v.share_memory_()
+                target_buffer.put(target_v)
 
-                    output_v = layer(input_v)
-                    send_opt = dist.isend(tensor=output_v, dst=1)
-                    send_opt.wait()
-                else:
-                    raise Exception('loader error', "loader is None")
+                output_v = layer(input_v)
+                send_opt = dist.isend(tensor=output_v, dst=1)
+                send_opt.wait()
             elif dist.get_rank() == 1:
                 try:
                     rec_val = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
@@ -513,10 +508,12 @@ def test(queue, layer, e, loader=None, target_buffer=None):
 
 def run(queue, layer, e, train_loader=None, test_loader=None, target_buffer=None):
 
-    for epoch in range(4):
-        print(str(dist.get_rank()) + "-train iter-" + str(epoch))
-        layer.train()
-        train(queue, layer, e, train_loader, target_buffer)
+    layer.train()
+    train(queue, layer, e, train_loader, target_buffer)
+    #for epoch in range(4):
+        #print(str(dist.get_rank()) + "-train iter-" + str(epoch))
+        #layer.train()
+        #train(queue, layer, e, train_loader, target_buffer)
         #print("test iter-" + str(epoch))
         #layer.eval()
         #with torch.no_grad():
