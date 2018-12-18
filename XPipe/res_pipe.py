@@ -514,7 +514,7 @@ def test(queue, layer, e, loader=None, target_buffer=None):
 def run(queue, layer, e, train_loader=None, test_loader=None, target_buffer=None):
 
     for epoch in range(4):
-        print("train iter-" + str(epoch))
+        print(str(dist.get_rank()) + "-train iter-" + str(epoch))
         layer.train()
         train(queue, layer, e, train_loader, target_buffer)
         #print("test iter-" + str(epoch))
