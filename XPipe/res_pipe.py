@@ -31,6 +31,9 @@ def train(queue, layer, e, loader=None, target_buffer=None):
 
     access_stop_flag = False
 
+    if dist.get_rank() == 0:
+        e.clear()
+
     try:
         while True:
 
@@ -332,6 +335,9 @@ def test(queue, layer, e, loader=None, target_buffer=None):
     temp_count = 0
     access_stop_flag = False
 
+    if dist.get_rank() == 0:
+        e.clear()
+
 
     try:
         while True:
@@ -507,16 +513,14 @@ def test(queue, layer, e, loader=None, target_buffer=None):
 
 def run(queue, layer, e, train_loader=None, test_loader=None, target_buffer=None):
 
-    for epoch in range(200):
+    for epoch in range(4):
         print("train iter-" + str(epoch))
-        e.clear()
         layer.train()
         train(queue, layer, e, train_loader, target_buffer)
-        #print("test iter-" + str(epoch))
-        #e.clear()
-        #layer.eval()
-        #with torch.no_grad():
-         #   test(queue, layer, e, test_loader, target_buffer)
+        print("test iter-" + str(epoch))
+        layer.eval()
+        with torch.no_grad():
+            test(queue, layer, e, test_loader, target_buffer)
 
 
 def init_processes(fn, path, size, buffer_queues, layers, target_buffer, rank, e, trainloader, testloader):
