@@ -31,9 +31,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
 
     access_stop_flag = False
 
-    queue.clear()
-    if target_buffer is not None:
-        target_buffer.clear()
     try:
         while True:
 
@@ -181,6 +178,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     optimizer.step()
 
                     all_loss += loss.item()
+                    print("train-loss:" + str(loss.item()))
                     _, predicted = output_v.max(1)
                     total += target_v.size(0)
                     correct += predicted.eq(target_v).sum().item()
@@ -334,9 +332,6 @@ def test(queue, layer, e, loader=None, target_buffer=None):
     temp_count = 0
     access_stop_flag = False
 
-    queue.clear()
-    if target_buffer is not None:
-        target_buffer.clear()
 
     try:
         while True:
@@ -466,7 +461,7 @@ def test(queue, layer, e, loader=None, target_buffer=None):
                     except Empty as empty:
                         print("rank 6 wait....")
                         dist.send(tensor=torch.zeros(1), dst=7)
-                        e.wait()
+                        e.set()
                         break
                     input_v.requires_grad_()
                     output_v = layer(input_v)
@@ -474,7 +469,7 @@ def test(queue, layer, e, loader=None, target_buffer=None):
                     target_v = target_buffer.get()
                     batch_idx += 1
                     loss = criterion(output_v, target_v)
-
+                    print("test-loss:" + str(loss.item()))
                     all_loss += loss.item()
                     _, predicted = output_v.max(1)
                     total += target_v.size(0)
@@ -483,8 +478,6 @@ def test(queue, layer, e, loader=None, target_buffer=None):
                     progress_bar(batch_idx, len(loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                                  % (all_loss / (batch_idx + 1), 100. * correct / total, correct, total))
 
-                    send_opt = dist.isend(tensor=input_v.grad, dst=7)
-                    send_opt.wait()
 
 
             elif dist.get_rank() == 7:
@@ -513,15 +506,26 @@ def test(queue, layer, e, loader=None, target_buffer=None):
 
 
 def run(queue, layer, e, train_loader=None, test_loader=None, target_buffer=None):
+    """
     for epoch in range(200):
+        print("train iter-" + str(epoch))
         e.clear()
         layer.train()
         train(queue, layer, e, train_loader, target_buffer)
+        print("test iter-" + str(epoch))
         e.clear()
         layer.eval()
         with torch.no_grad():
             test(queue, layer, e, test_loader, target_buffer)
-
+    """
+    e.clear()
+    layer.train()
+    train(queue, layer, e, train_loader, target_buffer)
+    print("before test..........")
+    e.clear()
+    layer.eval()
+    with torch.no_grad():
+        test(queue, layer, e, test_loader, target_buffer)
 
 def init_processes(fn, path, size, buffer_queues, layers, target_buffer, rank, e, trainloader, testloader):
     print("init process-" + str(rank) + "...." )
