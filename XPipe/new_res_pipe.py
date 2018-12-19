@@ -16,9 +16,12 @@ import traceback
 from queue import Empty
 
 
+"""
+each node has two threads(forward/backward) that share the data(one layer group) in a process.
+"""
 
 
-def train(queue, layer, e, loader=None, target_buffer=None):
+def train(layer, e, loader=None, target_buffer=None):
 
     batch_size = 128
 
@@ -321,214 +324,26 @@ def train(queue, layer, e, loader=None, target_buffer=None):
         return
 
 
-def test(queue, layer, e, loader=None, target_buffer=None):
-    batch_size = 128
-    all_loss = 0
-    total = 0
-    correct = 0
-    batch_idx = 0
-    temp_count = 0
-    access_stop_flag = False
-
-    if dist.get_rank() == 0:
-        e.clear()
-
-
-    try:
-        while True:
-
-            if dist.get_rank() == 0:
-
-                if loader is not None:
-                    dataiter = iter(loader)
-                    try:
-                        temp_count += 1
-                        if temp_count > 10:
-                            print("test stop.....")
-                            # stop_flag.value = 1
-                            dist.send(tensor=torch.zeros(1), dst=1)
-                            e.wait()
-                            break
-                        input_v, target_v = next(dataiter)
-                    except StopIteration as stop_e:
-                        print("batch iteration end..")
-                        dist.send(tensor=torch.zeros(1), dst=1)
-                        e.wait()
-                        break
-                    except Exception as e:
-                        traceback.format_exc()
-                        print("dataiter error.....")
-                        continue
-
-                    input_v.share_memory_()
-                    queue.put(input_v)
-
-                    target_v.share_memory_()
-                    target_buffer.put(target_v)
-
-                    output_v = layer(input_v)
-                    send_opt = dist.isend(tensor=output_v, dst=1)
-                    send_opt.wait()
-                else:
-                    raise Exception('loader error', "loader is None")
-            elif dist.get_rank() == 1:
-                try:
-                    rec_val = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
-                    dist.recv(tensor=rec_val, src=0)
-                except RuntimeError as error:
-                    print("rank 1 wait....")
-                    dist.send(tensor=torch.zeros(1), dst=2)
-                    e.wait()
-                    break
-                rec_val.share_memory_()
-                queue.put(rec_val)
-
-                output_v = layer(rec_val)
-
-                send_opt = dist.isend(tensor=output_v, dst=2)
-                send_opt.wait()
-
-            elif dist.get_rank() == 2:
-                try:
-                    rec_val = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
-                    dist.recv(tensor=rec_val, src=1)
-                except RuntimeError as error:
-                    print("rank 2 wait....")
-                    dist.send(tensor=torch.zeros(1), dst=3)
-                    e.wait()
-                    break
-                rec_val.share_memory_()
-                queue.put(rec_val)
-
-                output_v = layer(rec_val)
-
-                send_opt = dist.isend(tensor=output_v, dst=3)
-                send_opt.wait()
-            elif dist.get_rank() == 3:
-                try:
-                    rec_val = torch.zeros([batch_size, 128, 16, 16], requires_grad=True)
-                    dist.recv(tensor=rec_val, src=2)
-                except RuntimeError as error:
-                    print("rank 3 wait....")
-                    dist.send(tensor=torch.zeros(1), dst=4)
-                    e.wait()
-                    break
-                rec_val.share_memory_()
-                queue.put(rec_val)
-
-                output_v = layer(rec_val)
-                send_opt = dist.isend(tensor=output_v, dst=4)
-                send_opt.wait()
-            elif dist.get_rank() == 4:
-                try:
-                    rec_val = torch.zeros([batch_size, 256, 8, 8], requires_grad=True)
-                    dist.recv(tensor=rec_val, src=3)
-                except RuntimeError as error:
-                    print("rank 4 wait....")
-                    dist.send(tensor=torch.zeros(1), dst=5)
-                    e.wait()
-                    break
-                rec_val.share_memory_()
-                queue.put(rec_val)
-
-                output_v = layer(rec_val)
-
-                send_opt = dist.isend(tensor=output_v, dst=5)
-                send_opt.wait()
-            elif dist.get_rank() == 5:
-                try:
-                    rec_val = torch.zeros([batch_size, 512, 4, 4], requires_grad=True)
-                    dist.recv(tensor=rec_val, src=4)
-                except RuntimeError as error:
-                    print("rank 5 wait....")
-                    dist.send(tensor=torch.zeros(1), dst=6)
-                    e.wait()
-                    break
-                rec_val.share_memory_()
-                queue.put(rec_val)
-
-                send_opt = dist.isend(tensor=torch.randn(2), dst=6)
-                send_opt.wait()
-            elif dist.get_rank() == 6:
-                try:
-                    if not access_stop_flag:
-                        rec_val = torch.zeros(2)
-                        dist.recv(tensor=rec_val, src=5)
-                except RuntimeError as error:
-                    access_stop_flag = True
-                finally:
-                    try:
-                        input_v = queue.get(block=True, timeout=2)
-                    except Empty as empty:
-                        print("rank 6 wait....")
-                        dist.send(tensor=torch.zeros(1), dst=7)
-                        e.set()
-                        break
-                    input_v.requires_grad_()
-                    output_v = layer(input_v)
-                    criterion = nn.CrossEntropyLoss()
-                    target_v = target_buffer.get()
-                    batch_idx += 1
-                    loss = criterion(output_v, target_v)
-                    print(str(dist.get_rank()) + "-test-loss:" + str(loss.item()))
-                    all_loss += loss.item()
-                    _, predicted = output_v.max(1)
-                    total += target_v.size(0)
-                    correct += predicted.eq(target_v).sum().item()
-
-                    progress_bar(batch_idx, len(loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                                 % (all_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-
-
-
-            elif dist.get_rank() == 7:
-                e.wait()
-
-
-            elif dist.get_rank() == 8:
-                e.wait()
-
-            elif dist.get_rank() == 9:
-                e.wait()
-
-            elif dist.get_rank() == 10:
-                e.wait()
-
-            elif dist.get_rank() == 11:
-                e.wait()
-        print("rank" + str(dist.get_rank()) + "is stop")
-
-    except Exception as e:
-        # traceback.print_exc()
-        traceback.format_exc()
-        return
 
 
 
 
-def run(queue, layer, e, train_loader=None, test_loader=None, target_buffer=None):
+
+def run(layer, e, train_loader=None, test_loader=None, target_buffer=None):
 
     layer.train()
-    train(queue, layer, e, train_loader, target_buffer)
-    #for epoch in range(4):
-        #print(str(dist.get_rank()) + "-train iter-" + str(epoch))
-        #layer.train()
-        #train(queue, layer, e, train_loader, target_buffer)
-        #print("test iter-" + str(epoch))
-        #layer.eval()
-        #with torch.no_grad():
-            #test(queue, layer, e, test_loader, target_buffer)
+    train(layer, e, train_loader, target_buffer)
 
 
-def init_processes(fn, path, size, buffer_queues, layers, target_buffer, rank, e, trainloader, testloader):
+def init_processes(fn, path, size, layers, target_buffer, rank, e, trainloader, testloader):
     print("init process-" + str(rank) + "...." )
     dist.init_process_group(backend='tcp', init_method=path, world_size=size, rank=rank)
     if rank == 0:
-        fn(buffer_queues[0], layers[0], e, train_loader=trainloader, test_loader=testloader, target_buffer=target_buffer)
+        fn(layers[0], e, train_loader=trainloader, test_loader=testloader, target_buffer=target_buffer)
     elif rank == 6:
-        fn(buffer_queues[5], layers[5], e, target_buffer=target_buffer)
+        fn(layers[5], e, target_buffer=target_buffer)
     else:
-        fn(buffer_queues[rank if rank < 6 else (11 - rank)], layers[rank if rank < 6 else (11 - rank)], e)
+        fn(layers[rank if rank < 6 else (11 - rank)], e)
 
 
 
@@ -545,16 +360,7 @@ if __name__ == "__main__":
 
     num_blocks = [2, 2, 2, 2]
 
-    #stop_flag = Value('i', 0)
     e = Event()
-
-    buffer_queues = []
-    buffer_queues.append(Queue(100))
-    buffer_queues.append(Queue(100))
-    buffer_queues.append(Queue(100))
-    buffer_queues.append(Queue(100))
-    buffer_queues.append(Queue(100))
-    buffer_queues.append(Queue(100))
 
 
     layers = []
@@ -615,7 +421,7 @@ if __name__ == "__main__":
 
 
     for rank in range(args.size):
-        p = Process(target=init_processes, args=(run, args.path, args.size, buffer_queues, layers, target_buffer, rank, e, trainloader, testloader))
+        p = Process(target=init_processes, args=(run, args.path, args.size, layers, target_buffer, rank, e, trainloader, testloader))
         p.start()
         processes.append(p)
 
