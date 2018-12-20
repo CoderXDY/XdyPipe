@@ -28,6 +28,9 @@ def train(queue, layer, e, loader=None, target_buffer=None):
 
     access_stop_flag = False
 
+
+    send_num = 0
+
     # if dist.get_rank() == 0:
     #     e.clear()
     if loader is not None and dist.get_rank() == 0:
@@ -37,6 +40,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
 
             if dist.get_rank() == 0:
                 try:
+
                     input_v, target_v = next(data_iter)
                     print('rank 0')
                 except StopIteration as stop_e:
@@ -62,7 +66,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
 
                 output_v = layer(input_v)
                 send_opt = dist.isend(tensor=output_v, dst=1)
-                print("rank 0 send....")
                 #send_opt.wait()
             elif dist.get_rank() == 1:
                 try:
@@ -79,7 +82,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 output_v = layer(rec_val)
 
                 send_opt = dist.isend(tensor=output_v, dst=2)
-                print("rank 1 send...")
                 #send_opt.wait()
 
             elif dist.get_rank() == 2:
@@ -98,7 +100,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
 
                 send_opt = dist.isend(tensor=output_v, dst=3)
                 #send_opt.wait()
-                print("rank 2 send. ...")
             elif dist.get_rank() == 3:
                 try:
                     rec_val = torch.zeros([batch_size, 128, 16, 16], requires_grad=True)
@@ -114,7 +115,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 output_v = layer(rec_val)
                 send_opt = dist.isend(tensor=output_v, dst=4)
                 #send_opt.wait()
-                print("rank 3 send. ...")
             elif dist.get_rank() == 4:
                 try:
                     rec_val = torch.zeros([batch_size, 256, 8, 8], requires_grad=True)
@@ -131,7 +131,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
 
                 send_opt = dist.isend(tensor=output_v, dst=5)
                 #send_opt.wait()
-                print("rank 4 send. ...")
             elif dist.get_rank() == 5:
                 try:
                     rec_val = torch.zeros([batch_size, 512, 4, 4], requires_grad=True)
@@ -146,7 +145,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
 
                 send_opt = dist.isend(tensor=torch.randn(2), dst=6)
                 #send_opt.wait()
-                print("rank 5 send. ...")
             elif dist.get_rank() == 6:
                 try:
                     if not access_stop_flag:
@@ -188,7 +186,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
 
                     send_opt = dist.isend(tensor=input_v.grad, dst=7)
                     #send_opt.wait()
-                    print("rank 6 send. ...")
 
             elif dist.get_rank() == 7:
                 try:
@@ -214,7 +211,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     optimizer.step()
                     send_opt = dist.isend(tensor=input_v.grad, dst=8)
                     #send_opt.wait()
-                    print("rank 7 send. ...")
 
 
             elif dist.get_rank() == 8:
@@ -241,7 +237,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     optimizer.step()
                     send_opt = dist.isend(tensor=input_v.grad, dst=9)
                     #send_opt.wait()
-                    print("rank 8 send. ...")
 
 
             elif dist.get_rank() == 9:
@@ -268,7 +263,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     optimizer.step()
                     send_opt = dist.isend(tensor=input_v.grad, dst=10)
                     #send_opt.wait()
-                    print("rank 9 send. ...")
 
             elif dist.get_rank() == 10:
                 try:
@@ -294,7 +288,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     optimizer.step()
                     send_opt = dist.isend(tensor=input_v.grad, dst=11)
                     #send_opt.wait()
-                    print("rank 10 send. ...")
 
             elif dist.get_rank() == 11:
                 try:
