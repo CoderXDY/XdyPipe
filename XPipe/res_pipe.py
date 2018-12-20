@@ -40,7 +40,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
 
             if dist.get_rank() == 0:
                 try:
-
                     input_v, target_v = next(data_iter)
                 except StopIteration as stop_e:
                     if epoch < 2:
@@ -54,8 +53,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         e.wait()
                         break
                 except Exception as e:
-                    traceback.format_exc()
-                    print("dataiter error.....")
+                    traceback.format_exc(e)
                     continue
 
                 input_v.share_memory_()
@@ -198,7 +196,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 finally:
                     try:
                         input_v = queue.get(block=True, timeout=2)
-                        print("rank 7 get the input_V")
                     except Empty as empty:
                         print("rank 7 wait....")
                         dist.send(tensor=torch.zeros(1), dst=8)
@@ -317,7 +314,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
 
     except Exception as e:
         #traceback.print_exc()
-        traceback.format_exc()
+        traceback.format_exc(e)
         return
 
 
@@ -526,7 +523,7 @@ def init_processes(fn, path, size, buffer_queues, layers, target_buffer, rank, e
     if rank == 0:
         fn(buffer_queues[0], layers[0], e, train_loader=trainloader, test_loader=testloader, target_buffer=target_buffer)
     elif rank == 6:
-        fn(buffer_queues[5], layers[5], e, target_buffer=target_buffer)
+        fn(buffer_queues[5], layers[5], e, train_loader=trainloader, target_buffer=target_buffer)
     else:
         fn(buffer_queues[rank if rank < 6 else (11 - rank)], layers[rank if rank < 6 else (11 - rank)], e)
 
