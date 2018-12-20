@@ -4,13 +4,14 @@ import torch.distributed as dist
 from torch import nn as nn
 import argparse
 from torch.multiprocessing import Process, Queue, Value, Event
+from multiprocessing.dummy import Process as TProcess
 import torch.nn.functional as F
 import torch.optim as optim
 import logging as Log
 import time
 from queue import Empty
 import traceback
-
+import threading
 """
 
 
@@ -59,24 +60,20 @@ class Layer(nn.Module):
 #                 break
 
 def run(q, e):
-    print("rank-" + str(dist.get_rank()) + ".....")
-    if dist.get_rank() == 0:
-        send_opt = dist.isend(tensor=torch.zeros(1), dst=1)
-        send_opt.wait()
-        print("rank " + str(dist.get_rank()) + " has send...")
-    elif dist.get_rank() == 1:
-        try:
-            rev_val = torch.randn(1)
-            rev_opt = dist.irecv(tensor=rev_val, src=0)
-            rev_opt.wait()
-            print("666")
-        except RuntimeError as error:
-            #print("rank " + str(dist.get_rank()) + "has recive...")
-            print("rank 1 rev_val is None")
-            #traceback.format_exc(error)
-        finally:
-            print("forever")
 
+
+    if dist.get_rank() == 0:
+        print(threading.currentThread().name)
+        print("rank-" + str(dist.get_rank()) + ".....")
+        opt = dist.irecv(tensor=torch.randn(1), src=1)
+        opt.wait()
+        print("rank-" + str(dist.get_rank()) + " success receve")
+    elif dist.get_rank() == 1:
+        print(threading.currentThread().name)
+        print("rank-" + str(dist.get_rank()) + ".....")
+        opt = dist.isend(tensor=torch.randn(1), dst=0)
+        opt.wait()
+        print("rank-" + str(dist.get_rank()) + " success send")
 
 
 
@@ -84,6 +81,7 @@ def run(q, e):
 
 
 def init_processes(fn, path, size, rank, q, e):
+    print("init-" + str(rank))
     dist.init_process_group(backend='tcp', init_method=path, world_size=size, rank=rank)
     fn(q, e)
 
@@ -102,6 +100,7 @@ if __name__ == "__main__":
     q = Queue(10)
     e = Event()
     for rank in range(args.size):
+        print(rank)
         p = Process(target=init_processes, args=(run, args.path, args.size, rank, q, e))
         p.start()
         processes.append(p)
