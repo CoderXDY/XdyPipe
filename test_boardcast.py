@@ -63,17 +63,32 @@ def run(q, e):
 
 
     if dist.get_rank() == 0:
-        print(threading.currentThread().name)
+        #print(threading.currentThread().name)
         print("rank-" + str(dist.get_rank()) + ".....")
-        opt = dist.irecv(tensor=torch.randn(1), src=1)
-        opt.wait()
-        print("rank-" + str(dist.get_rank()) + " success receve")
+        count = 0
+        while True:
+            try:
+                val = torch.zeros(1)
+                dist.recv(tensor=val, src=1)
+                print('count-' + str(count) + ".....")
+                print(val)
+                count += 1
+            except RuntimeError:
+                print("rank-" + str(dist.get_rank()) + " success receve")
+                break
+        e.set()
     elif dist.get_rank() == 1:
-        print(threading.currentThread().name)
+        #print(threading.currentThread().name)
         print("rank-" + str(dist.get_rank()) + ".....")
-        opt = dist.isend(tensor=torch.randn(1), dst=0)
-        opt.wait()
+        a = [torch.randn(1), torch.randn(1), torch.randn(1), torch.randn(1),torch.randn(1), torch.randn(1), torch.randn(1), torch.randn(1),torch.randn(1), torch.randn(1)]
+        for aa in a:
+            print(aa)
+        for i in range(10):
+            opt = dist.isend(tensor=a[i], dst=0)
+        opt = dist.isend(tensor=torch.randn(2), dst=0)
         print("rank-" + str(dist.get_rank()) + " success send")
+        e.wait()
+
 
 
 
