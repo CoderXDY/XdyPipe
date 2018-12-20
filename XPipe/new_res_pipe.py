@@ -195,7 +195,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 finally:
                     try:
                         input_v = queue.get(block=True, timeout=2)
-                        print("rank 7 get the input_V")
                     except Empty as empty:
                         print("rank 7 wait....")
                         dist.send(tensor=torch.zeros(1), dst=8)
