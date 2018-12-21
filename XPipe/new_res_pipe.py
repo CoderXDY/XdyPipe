@@ -31,7 +31,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
 
     package_size = 2
 
-    send_num = 12
+    send_num = 4
 
     # if dist.get_rank() == 0:
     #     e.clear()
@@ -118,6 +118,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 send_opt = dist.isend(tensor=package, dst=3)
                 if queue.qsize() > send_num:
                     send_opt.wait()
+                print("rank 2 send......")
             elif dist.get_rank() == 3:
                 try:
                     rec_val = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
@@ -138,6 +139,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 send_opt = dist.isend(tensor=package, dst=4)
                 if queue.qsize() > send_num:
                     send_opt.wait()
+                print("rank 3 send......")
             elif dist.get_rank() == 4:
                 try:
                     rec_val = torch.zeros([package_size, batch_size, 256, 8, 8], requires_grad=True)
@@ -158,6 +160,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 send_opt = dist.isend(tensor=package, dst=5)
                 if queue.qsize() > send_num:
                     send_opt.wait()
+                print("rank 4 send.......")
             elif dist.get_rank() == 5:
                 try:
                     rec_val = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
@@ -173,6 +176,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 send_opt = dist.isend(tensor=torch.randn(2), dst=6)
                 if queue.qsize() > send_num:
                     send_opt.wait()
+                print("rank 5 send......")
             elif dist.get_rank() == 6:
                 try:
                     if not access_stop_flag:
@@ -218,6 +222,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         package[count] = input_v.grad
 
                     dist.isend(tensor=package, dst=7)
+                    print("rank 6 send ......")
             elif dist.get_rank() == 7:
                 try:
                     if not access_stop_flag:
@@ -276,7 +281,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         optimizer.step()
                         package[count] = input_v.grad
                     dist.isend(tensor=package, dst=9)
-
+                    print("rank 8 send.....")
 
             elif dist.get_rank() == 9:
                 try:
@@ -305,7 +310,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         optimizer.step()
                         package[count] = input_v.grad
                     dist.isend(tensor=package, dst=10)
-
+                    print("rank 9 send.....")
             elif dist.get_rank() == 10:
                 try:
                     if not access_stop_flag:
@@ -333,7 +338,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         optimizer.step()
                         package[count] = input_v.grad
                     dist.isend(tensor=package, dst=11)
-
+                    print("rank 10 send....")
             elif dist.get_rank() == 11:
                 try:
                     if not access_stop_flag:
@@ -363,9 +368,9 @@ def train(queue, layer, e, loader=None, target_buffer=None):
 
     except Exception as e:
         # traceback.print_exc()
-        print("exception rank-" + str(dist.get_rank()))
-        print(e)
-        traceback.format_exc()
+        #print("exception rank-" + str(dist.get_rank()))
+        #print(e)
+        traceback.format_exc(e)
         return
 
 
