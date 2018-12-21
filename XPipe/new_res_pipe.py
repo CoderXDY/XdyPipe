@@ -29,7 +29,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
     access_stop_flag = False
 
 
-    send_num = 0
+    package_size = 4
 
     # if dist.get_rank() == 0:
     #     e.clear()
@@ -39,10 +39,20 @@ def train(queue, layer, e, loader=None, target_buffer=None):
         while True:
 
             if dist.get_rank() == 0:
+                package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                 try:
-
-                    input_v, target_v = next(data_iter)
-                    print('rank 0')
+                    input_v_pack = torch.zeros([package_size, batch_size, 3, 32, 32], requires_grad=True)
+                    target_v_pack = torch.zeros([package_size, batch_size], requires_grad=True)
+                    for count in range(package_size):
+                        input_v, target_v = next(data_iter)
+                        input_v_pack[count] = input_v
+                        target_v_pack[count] = target_v
+                        output_v = layer(input_v)
+                        package[count] = output_v
+                    input_v_pack.share_memory_()
+                    queue.put(input_v_pack)
+                    target_v_pack.share_memory_()
+                    target_buffer.put(target_v_pack)
                 except StopIteration as stop_e:
                     if epoch < 2:
                         print("epoch-" + str(epoch) + " end....")
@@ -57,19 +67,11 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 except Exception as e:
                     traceback.format_exc()
                     continue
+                dist.isend(tensor=package, dst=1)
 
-                input_v.share_memory_()
-                queue.put(input_v)
-
-                target_v.share_memory_()
-                target_buffer.put(target_v)
-
-                output_v = layer(input_v)
-                send_opt = dist.isend(tensor=output_v, dst=1)
-                #send_opt.wait()
             elif dist.get_rank() == 1:
                 try:
-                    rec_val = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
+                    rec_val = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                     dist.recv(tensor=rec_val, src=0)
                 except RuntimeError as error:
                     print("rank 1 wait....")
@@ -79,14 +81,17 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 rec_val.share_memory_()
                 queue.put(rec_val)
 
-                output_v = layer(rec_val)
+                package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
+                for count in range(package_size):
+                    one_batch = rec_val[count]
+                    output_v = layer(one_batch)
+                    package[count] = output_v
+                dist.isend(tensor=package, dst=2)
 
-                send_opt = dist.isend(tensor=output_v, dst=2)
-                #send_opt.wait()
 
             elif dist.get_rank() == 2:
                 try:
-                    rec_val = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
+                    rec_val = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                     dist.recv(tensor=rec_val, src=1)
                 except RuntimeError as error:
                     print("rank 2 wait....")
@@ -96,13 +101,15 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 rec_val.share_memory_()
                 queue.put(rec_val)
 
-                output_v = layer(rec_val)
-
-                send_opt = dist.isend(tensor=output_v, dst=3)
-                #send_opt.wait()
+                package = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
+                for count in range(package_size):
+                    one_batch = rec_val[count]
+                    output_v = layer(one_batch)
+                    package[count] = output_v
+                dist.isend(tensor=package, dst=3)
             elif dist.get_rank() == 3:
                 try:
-                    rec_val = torch.zeros([batch_size, 128, 16, 16], requires_grad=True)
+                    rec_val = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
                     dist.recv(tensor=rec_val, src=2)
                 except RuntimeError as error:
                     print("rank 3 wait....")
@@ -112,12 +119,15 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 rec_val.share_memory_()
                 queue.put(rec_val)
 
-                output_v = layer(rec_val)
-                send_opt = dist.isend(tensor=output_v, dst=4)
-                #send_opt.wait()
+                package = torch.zeros([package_size, batch_size, 256, 8, 8], requires_grad=True)
+                for count in range(package_size):
+                    one_batch = rec_val[count]
+                    output_v = layer(one_batch)
+                    package[count] = output_v
+                dist.isend(tensor=package, dst=4)
             elif dist.get_rank() == 4:
                 try:
-                    rec_val = torch.zeros([batch_size, 256, 8, 8], requires_grad=True)
+                    rec_val = torch.zeros([package_size, batch_size, 256, 8, 8], requires_grad=True)
                     dist.recv(tensor=rec_val, src=3)
                 except RuntimeError as error:
                     print("rank 4 wait....")
@@ -127,13 +137,15 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 rec_val.share_memory_()
                 queue.put(rec_val)
 
-                output_v = layer(rec_val)
-
-                send_opt = dist.isend(tensor=output_v, dst=5)
-                #send_opt.wait()
+                package = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
+                for count in range(package_size):
+                    one_batch = rec_val[count]
+                    output_v = layer(one_batch)
+                    package[count] = output_v
+                dist.isend(tensor=package, dst=5)
             elif dist.get_rank() == 5:
                 try:
-                    rec_val = torch.zeros([batch_size, 512, 4, 4], requires_grad=True)
+                    rec_val = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
                     dist.recv(tensor=rec_val, src=4)
                 except RuntimeError as error:
                     print("rank 5 wait....")
@@ -143,8 +155,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 rec_val.share_memory_()
                 queue.put(rec_val)
 
-                send_opt = dist.isend(tensor=torch.randn(2), dst=6)
-                #send_opt.wait()
+                dist.isend(tensor=torch.randn(2), dst=6)
             elif dist.get_rank() == 6:
                 try:
                     if not access_stop_flag:
@@ -154,163 +165,184 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     access_stop_flag = True
                 finally:
                     try:
-                        input_v = queue.get(block=True, timeout=2)
+                        rec_pack = queue.get(block=True, timeout=2)
                     except Empty as empty:
                         print("rank 6 wait....")
                         dist.send(tensor=torch.zeros(1), dst=7)
                         e.wait()
                         break
-                    input_v.requires_grad_()
-                    output_v = layer(input_v)
+                    package = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
+                    target_v_pack = target_buffer.get()
+                    for count in range(package_size):
+                        input_v = rec_pack[count]
+                        input_v.requires_grad_()
+                        output_v = layer(input_v)
 
-                    optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
+                        optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
 
-                    optimizer.zero_grad()
+                        optimizer.zero_grad()
 
-                    criterion = nn.CrossEntropyLoss()
-                    target_v = target_buffer.get()
-                    batch_idx += 1
-                    loss = criterion(output_v, target_v)
-                    loss.backward()
+                        criterion = nn.CrossEntropyLoss()
+                        target_v = target_v_pack[count]
+                        batch_idx += 1
+                        loss = criterion(output_v, target_v)
+                        loss.backward()
 
-                    optimizer.step()
+                        optimizer.step()
 
-                    all_loss += loss.item()
-                    print(str(dist.get_rank()) + "-train-loss:" + str(loss.item()))
-                    _, predicted = output_v.max(1)
-                    total += target_v.size(0)
-                    correct += predicted.eq(target_v).sum().item()
+                        all_loss += loss.item()
+                        print(str(dist.get_rank()) + "-train-loss:" + str(loss.item()))
+                        _, predicted = output_v.max(1)
+                        total += target_v.size(0)
+                        correct += predicted.eq(target_v).sum().item()
 
-                    progress_bar(batch_idx, len(loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                        progress_bar(batch_idx, len(loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                                  % (all_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                        package[count] = input_v.grad
 
-                    send_opt = dist.isend(tensor=input_v.grad, dst=7)
-                    #send_opt.wait()
+                    dist.isend(tensor=package, dst=7)
 
             elif dist.get_rank() == 7:
                 try:
                     if not access_stop_flag:
-                        back_grad = torch.zeros([batch_size, 512, 4, 4], requires_grad=True)
-                        dist.recv(tensor=back_grad, src=6)
+                        back_grad_pack = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
+                        dist.recv(tensor=back_grad_pack, src=6)
                 except RuntimeError as error:
                     access_stop_flag = True
                 finally:
                     try:
-                        input_v = queue.get(block=True, timeout=2)
+                        input_v_pack = queue.get(block=True, timeout=2)
                     except Empty as empty:
                         print("rank 7 wait....")
                         dist.send(tensor=torch.zeros(1), dst=8)
                         e.wait()
                         break
-                    input_v.requires_grad_()
-                    output_v = layer(input_v)
+                    package = torch.zeros([package_size, batch_size, 256, 8, 8], requires_grad=True)
+                    for count in range(package_size):
+                        input_v = input_v_pack[count]
+                        input_v.requires_grad_()
+                        back_grad = back_grad_pack[count]# requires_grad == True????????
+                        output_v = layer(input_v)
 
-                    optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
-                    optimizer.zero_grad()
-                    output_v.backward(back_grad)
-                    optimizer.step()
-                    send_opt = dist.isend(tensor=input_v.grad, dst=8)
-                    #send_opt.wait()
+                        optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
+                        optimizer.zero_grad()
+                        output_v.backward(back_grad)
+                        optimizer.step()
+                        package[count] = input_v.grad
+                    dist.isend(tensor=package, dst=8)
 
 
             elif dist.get_rank() == 8:
                 try:
                     if not access_stop_flag:
-                        back_grad = torch.zeros([batch_size, 256, 8, 8], requires_grad=True)
-                        dist.recv(tensor=back_grad, src=7)
+                        back_grad_pack = torch.zeros([package_size, batch_size, 256, 8, 8], requires_grad=True)
+                        dist.recv(tensor=back_grad_pack, src=7)
                 except RuntimeError as error:
                     access_stop_flag = True
                 finally:
                     try:
-                        input_v = queue.get(block=True, timeout=2)
+                        input_v_pack = queue.get(block=True, timeout=2)
                     except Empty as empty:
                         print("rank 8 wait...")
                         dist.send(tensor=torch.zeros(1), dst=9)
                         e.wait()
                         break
-                    input_v.requires_grad_()
-                    output_v = layer(input_v)
+                    package = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
+                    for count in range(package_size):
+                        input_v = input_v_pack[count]
+                        input_v.requires_grad_()
+                        back_grad = back_grad_pack[count]
+                        output_v = layer(input_v)
 
-                    optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
-                    optimizer.zero_grad()
-                    output_v.backward(back_grad)
-                    optimizer.step()
-                    send_opt = dist.isend(tensor=input_v.grad, dst=9)
-                    #send_opt.wait()
+                        optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
+                        optimizer.zero_grad()
+                        output_v.backward(back_grad)
+                        optimizer.step()
+                        package[count] = input_v.grad
+                    dist.isend(tensor=package, dst=9)
 
 
             elif dist.get_rank() == 9:
                 try:
                     if not access_stop_flag:
-                        back_grad = torch.zeros([batch_size, 128, 16, 16], requires_grad=True)
-                        dist.recv(tensor=back_grad, src=8)
+                        back_grad_pack = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
+                        dist.recv(tensor=back_grad_pack, src=8)
                 except RuntimeError as error:
                     access_stop_flag = True
                 finally:
                     try:
-                        input_v = queue.get(block=True, timeout=2)
+                        input_v_pack = queue.get(block=True, timeout=2)
                     except Empty as empty:
                         print("rank 9 wait.....")
                         dist.send(tensor=torch.zeros(1), dst=10)
                         e.wait()
                         break
-                    input_v.requires_grad_()
-                    output_v = layer(input_v)
-
-                    optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
-                    optimizer.zero_grad()
-                    output_v.backward(back_grad)
-                    optimizer.step()
-                    send_opt = dist.isend(tensor=input_v.grad, dst=10)
-                    #send_opt.wait()
+                    package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
+                    for count in range(package_size):
+                        input_v = input_v_pack[count]
+                        input_v.requires_grad_()
+                        back_grad = back_grad_pack[count]
+                        output_v = layer(input_v)
+                        optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
+                        optimizer.zero_grad()
+                        output_v.backward(back_grad)
+                        optimizer.step()
+                        package[count] = input_v.grad
+                    dist.isend(tensor=package, dst=10)
 
             elif dist.get_rank() == 10:
                 try:
                     if not access_stop_flag:
-                        back_grad = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
-                        dist.recv(tensor=back_grad, src=9)
+                        back_grad_pack = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
+                        dist.recv(tensor=back_grad_pack, src=9)
                 except RuntimeError as error:
                     access_stop_flag = True
                 finally:
                     try:
-                        input_v = queue.get(block=True, timeout=2)
+                        input_v_pack = queue.get(block=True, timeout=2)
                     except Empty as empty:
                         print("rank 10 wait....")
                         dist.send(tensor=torch.zeros(1), dst=11)
                         e.wait()
                         break
-                    input_v.requires_grad_()
-                    output_v = layer(input_v)
-
-                    optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
-                    optimizer.zero_grad()
-                    output_v.backward(back_grad)
-                    optimizer.step()
-                    send_opt = dist.isend(tensor=input_v.grad, dst=11)
-                    #send_opt.wait()
+                    package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
+                    for count in range(package_size):
+                        input_v = input_v_pack[count]
+                        input_v.requires_grad_()
+                        back_grad = back_grad_pack[count]
+                        output_v = layer(input_v)
+                        optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
+                        optimizer.zero_grad()
+                        output_v.backward(back_grad)
+                        optimizer.step()
+                        package[count] = input_v.grad
+                    dist.isend(tensor=package, dst=11)
 
             elif dist.get_rank() == 11:
                 try:
                     if not access_stop_flag:
-                        back_grad = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
-                        dist.recv(tensor=back_grad, src=10)
+                        back_grad_pack = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
+                        dist.recv(tensor=back_grad_pack, src=10)
                 except RuntimeError as error:
                     access_stop_flag = True
                 finally:
                     try:
-                        input_v = queue.get(block=True, timeout=2)
+                        input_v_pack = queue.get(block=True, timeout=2)
 
                     except Empty as empty:
                         print("rank 11 start stop process.....")
                         e.set()
                         break
-                    input_v.requires_grad_()
-                    output_v = layer(input_v)
+                    for count in range(package_size):
+                        input_v = input_v_pack[count]
+                        input_v.requires_grad_()
+                        back_grad = back_grad_pack[count]
+                        output_v = layer(input_v)
 
-                    optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
-                    optimizer.zero_grad()
-                    output_v.backward(back_grad)
-                    optimizer.step()
+                        optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
+                        optimizer.zero_grad()
+                        output_v.backward(back_grad)
+                        optimizer.step()
         print("rank" + str(dist.get_rank()) + "is stop")
 
     except Exception as e:
@@ -319,186 +351,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
         return
 
 
-def test(queue, layer, e, loader=None, target_buffer=None):
-    batch_size = 100
-    all_loss = 0
-    total = 0
-    correct = 0
-    batch_idx = 0
-    temp_count = 0
-    access_stop_flag = False
 
-    if dist.get_rank() == 0:
-        e.clear()
-
-    try:
-        while True:
-
-            if dist.get_rank() == 0:
-
-                if loader is not None:
-                    dataiter = iter(loader)
-                    try:
-                        temp_count += 1
-                        if temp_count > 10:
-                            print("test stop.....")
-                            # stop_flag.value = 1
-                            dist.send(tensor=torch.zeros(1), dst=1)
-                            e.wait()
-                            break
-                        input_v, target_v = next(dataiter)
-                    except StopIteration as stop_e:
-                        print("batch iteration end..")
-                        dist.send(tensor=torch.zeros(1), dst=1)
-                        e.wait()
-                        break
-                    except Exception as e:
-                        traceback.format_exc()
-                        print("dataiter error.....")
-                        continue
-
-                    input_v.share_memory_()
-                    queue.put(input_v)
-
-                    target_v.share_memory_()
-                    target_buffer.put(target_v)
-
-                    output_v = layer(input_v)
-                    send_opt = dist.isend(tensor=output_v, dst=1)
-                    send_opt.wait()
-                else:
-                    raise Exception('loader error', "loader is None")
-            elif dist.get_rank() == 1:
-                try:
-                    rec_val = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
-                    dist.recv(tensor=rec_val, src=0)
-                except RuntimeError as error:
-                    print("rank 1 wait....")
-                    dist.send(tensor=torch.zeros(1), dst=2)
-                    e.wait()
-                    break
-                rec_val.share_memory_()
-                queue.put(rec_val)
-
-                output_v = layer(rec_val)
-
-                send_opt = dist.isend(tensor=output_v, dst=2)
-                send_opt.wait()
-
-            elif dist.get_rank() == 2:
-                try:
-                    rec_val = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
-                    dist.recv(tensor=rec_val, src=1)
-                except RuntimeError as error:
-                    print("rank 2 wait....")
-                    dist.send(tensor=torch.zeros(1), dst=3)
-                    e.wait()
-                    break
-                rec_val.share_memory_()
-                queue.put(rec_val)
-
-                output_v = layer(rec_val)
-
-                send_opt = dist.isend(tensor=output_v, dst=3)
-                send_opt.wait()
-            elif dist.get_rank() == 3:
-                try:
-                    rec_val = torch.zeros([batch_size, 128, 16, 16], requires_grad=True)
-                    dist.recv(tensor=rec_val, src=2)
-                except RuntimeError as error:
-                    print("rank 3 wait....")
-                    dist.send(tensor=torch.zeros(1), dst=4)
-                    e.wait()
-                    break
-                rec_val.share_memory_()
-                queue.put(rec_val)
-
-                output_v = layer(rec_val)
-                send_opt = dist.isend(tensor=output_v, dst=4)
-                send_opt.wait()
-            elif dist.get_rank() == 4:
-                try:
-                    rec_val = torch.zeros([batch_size, 256, 8, 8], requires_grad=True)
-                    dist.recv(tensor=rec_val, src=3)
-                except RuntimeError as error:
-                    print("rank 4 wait....")
-                    dist.send(tensor=torch.zeros(1), dst=5)
-                    e.wait()
-                    break
-                rec_val.share_memory_()
-                queue.put(rec_val)
-
-                output_v = layer(rec_val)
-
-                send_opt = dist.isend(tensor=output_v, dst=5)
-                send_opt.wait()
-            elif dist.get_rank() == 5:
-                try:
-                    rec_val = torch.zeros([batch_size, 512, 4, 4], requires_grad=True)
-                    dist.recv(tensor=rec_val, src=4)
-                except RuntimeError as error:
-                    print("rank 5 wait....")
-                    dist.send(tensor=torch.zeros(1), dst=6)
-                    e.wait()
-                    break
-                rec_val.share_memory_()
-                queue.put(rec_val)
-
-                send_opt = dist.isend(tensor=torch.randn(2), dst=6)
-                send_opt.wait()
-            elif dist.get_rank() == 6:
-                try:
-                    if not access_stop_flag:
-                        rec_val = torch.zeros(2)
-                        dist.recv(tensor=rec_val, src=5)
-                except RuntimeError as error:
-                    access_stop_flag = True
-                finally:
-                    try:
-                        input_v = queue.get(block=True, timeout=2)
-                    except Empty as empty:
-                        print("rank 6 wait....")
-                        dist.send(tensor=torch.zeros(1), dst=7)
-                        e.set()
-                        break
-                    input_v.requires_grad_()
-                    output_v = layer(input_v)
-                    criterion = nn.CrossEntropyLoss()
-                    target_v = target_buffer.get()
-                    batch_idx += 1
-                    loss = criterion(output_v, target_v)
-                    print(str(dist.get_rank()) + "-test-loss:" + str(loss.item()))
-                    all_loss += loss.item()
-                    _, predicted = output_v.max(1)
-                    total += target_v.size(0)
-                    correct += predicted.eq(target_v).sum().item()
-
-                    progress_bar(batch_idx, len(loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                                 % (all_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-
-
-
-            elif dist.get_rank() == 7:
-                e.wait()
-
-
-            elif dist.get_rank() == 8:
-                e.wait()
-
-            elif dist.get_rank() == 9:
-                e.wait()
-
-            elif dist.get_rank() == 10:
-                e.wait()
-
-            elif dist.get_rank() == 11:
-                e.wait()
-        print("rank" + str(dist.get_rank()) + "is stop")
-
-    except Exception as e:
-        # traceback.print_exc()
-        traceback.format_exc()
-        return
 
 
 def run(queue, layer, e, train_loader=None, test_loader=None, target_buffer=None):
