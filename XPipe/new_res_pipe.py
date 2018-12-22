@@ -29,9 +29,9 @@ def train(queue, layer, e, loader=None, target_buffer=None):
     access_stop_flag = False
 
 
-    package_size = 2
+    package_size = 1
 
-    send_num = 4
+    send_num = 0
 
     # if dist.get_rank() == 0:
     #     e.clear()
@@ -67,19 +67,22 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         e.wait()
                         break
                 except Exception as e:
+                    #print(e)
+                    #traceback.format_exc()
+                    print("rank-" + str(dist.get_rank()))
                     print(e)
-                    traceback.format_exc()
                     continue
                 send_opt = dist.isend(tensor=package, dst=1)
-                if queue.qsize() > send_num:
-                    send_opt.wait()
+                #if queue.qsize() > send_num:
+                send_opt.wait()
                 print("rank 0 send....")
             elif dist.get_rank() == 1:
                 try:
                     rec_val = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                     dist.recv(tensor=rec_val, src=0)
                 except RuntimeError as error:
-                    print(error)
+                    #print(error)
+                    #traceback.format_stack()
                     print("rank 1 wait....")
                     dist.send(tensor=torch.zeros(1), dst=2)
                     e.wait()
@@ -93,19 +96,25 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     output_v = layer(one_batch)
                     package[count] = output_v
                 send_opt = dist.isend(tensor=package, dst=2)
-                if queue.qsize() > send_num:
-                    send_opt.wait()
+                #if queue.qsize() > send_num:
+                send_opt.wait()
                 print("rank 1 send......")
             elif dist.get_rank() == 2:
                 try:
                     rec_val = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                     dist.recv(tensor=rec_val, src=1)
                 except RuntimeError as error:
-                    print(error)
+                    #traceback.format_stack()
+                    #print("rank 2 wait....")
+                    #traceback.format.exc()
+                    print("rank-" + str(dist.get_rank()))
                     traceback.format_exc()
-                    print("rank 2 wait....")
+                    print(error)
                     dist.send(tensor=torch.zeros(1), dst=3)
                     e.wait()
+                    break
+                except Exception as ee:
+                    trackback.format_stack()
                     break
                 rec_val.share_memory_()
                 queue.put(rec_val)
@@ -116,8 +125,8 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     output_v = layer(one_batch)
                     package[count] = output_v
                 send_opt = dist.isend(tensor=package, dst=3)
-                if queue.qsize() > send_num:
-                    send_opt.wait()
+                #if queue.qsize() > send_num:
+                send_opt.wait()
                 print("rank 2 send......")
             elif dist.get_rank() == 3:
                 try:
@@ -137,8 +146,8 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     output_v = layer(one_batch)
                     package[count] = output_v
                 send_opt = dist.isend(tensor=package, dst=4)
-                if queue.qsize() > send_num:
-                    send_opt.wait()
+                #if queue.qsize() > send_num:
+                send_opt.wait()
                 print("rank 3 send......")
             elif dist.get_rank() == 4:
                 try:
@@ -158,8 +167,8 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     output_v = layer(one_batch)
                     package[count] = output_v
                 send_opt = dist.isend(tensor=package, dst=5)
-                if queue.qsize() > send_num:
-                    send_opt.wait()
+                #if queue.qsize() > send_num:
+                send_opt.wait()
                 print("rank 4 send.......")
             elif dist.get_rank() == 5:
                 try:
@@ -174,8 +183,8 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 queue.put(rec_val)
 
                 send_opt = dist.isend(tensor=torch.randn(2), dst=6)
-                if queue.qsize() > send_num:
-                    send_opt.wait()
+                #if queue.qsize() > send_num:
+                send_opt.wait()
                 print("rank 5 send......")
             elif dist.get_rank() == 6:
                 try:
@@ -370,7 +379,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
         # traceback.print_exc()
         #print("exception rank-" + str(dist.get_rank()))
         #print(e)
-        traceback.format_exc(e)
+        traceback.format_stack()
         return
 
 
