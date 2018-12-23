@@ -244,6 +244,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         package[count] = input_v.grad
 
                     dist.isend(tensor=package, dst=7)
+                    send_opt.wait()
                     logger.error('rank 6 send.....')
             elif dist.get_rank() == 7:
                 try:
@@ -273,6 +274,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         optimizer.step()
                         package[count] = input_v.grad
                     dist.isend(tensor=package, dst=8)
+                    send_opt.wait()
                     logger.error('rank 7 send....')
             elif dist.get_rank() == 8:
                 try:
@@ -302,6 +304,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         optimizer.step()
                         package[count] = input_v.grad
                     dist.isend(tensor=package, dst=9)
+                    send_opt.wait()
                     logger.error('rank 8 send.....')
 
             elif dist.get_rank() == 9:
@@ -331,6 +334,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         optimizer.step()
                         package[count] = input_v.grad
                     dist.isend(tensor=package, dst=10)
+                    send_opt.wait()
                     logger.error('rank 9 send....')
             elif dist.get_rank() == 10:
                 try:
@@ -359,6 +363,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         optimizer.step()
                         package[count] = input_v.grad
                     dist.isend(tensor=package, dst=11)
+                    send_opt.wait()
                     logger.error('rank 10 send......')
 
             elif dist.get_rank() == 11:
