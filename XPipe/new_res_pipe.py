@@ -243,7 +243,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                                  % (all_loss / (batch_idx + 1), 100. * correct / total, correct, total))
                         package[count] = input_v.grad
 
-                    dist.isend(tensor=package, dst=7)
+                    send_opt = dist.isend(tensor=package, dst=7)
                     send_opt.wait()
                     logger.error('rank 6 send.....')
             elif dist.get_rank() == 7:
@@ -273,7 +273,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         output_v.backward(back_grad)
                         optimizer.step()
                         package[count] = input_v.grad
-                    dist.isend(tensor=package, dst=8)
+                    send_opt = dist.isend(tensor=package, dst=8)
                     send_opt.wait()
                     logger.error('rank 7 send....')
             elif dist.get_rank() == 8:
@@ -303,7 +303,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         output_v.backward(back_grad)
                         optimizer.step()
                         package[count] = input_v.grad
-                    dist.isend(tensor=package, dst=9)
+                    send_opt = dist.isend(tensor=package, dst=9)
                     send_opt.wait()
                     logger.error('rank 8 send.....')
 
@@ -333,7 +333,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         output_v.backward(back_grad)
                         optimizer.step()
                         package[count] = input_v.grad
-                    dist.isend(tensor=package, dst=10)
+                    send_opt = dist.isend(tensor=package, dst=10)
                     send_opt.wait()
                     logger.error('rank 9 send....')
             elif dist.get_rank() == 10:
@@ -362,7 +362,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         output_v.backward(back_grad)
                         optimizer.step()
                         package[count] = input_v.grad
-                    dist.isend(tensor=package, dst=11)
+                    send_opt=dist.isend(tensor=package, dst=11)
                     send_opt.wait()
                     logger.error('rank 10 send......')
 
