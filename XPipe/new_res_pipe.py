@@ -38,9 +38,9 @@ def train(queue, layer, e, loader=None, target_buffer=None):
     access_stop_flag = False
 
 
-    package_size = 1
+    package_size = 4
 
-    send_num = 0
+    send_num = 12
 
     # if dist.get_rank() == 0:
     #     e.clear()
