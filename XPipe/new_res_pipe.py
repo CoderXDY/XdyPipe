@@ -20,7 +20,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
 
     logger = logging.getLogger('rank-' +str(dist.get_rank()))
     file_handler = logging.FileHandler('rank-' + str(dist.get_rank()) + '.log')
-    file_handler.setLevel(level=logging.INFO)
+    file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(levelname)s:%(asctime)s | pricess_id-%(process)d | %(funcName)s->%(lineno)d | %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
@@ -176,7 +176,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 send_opt = dist.isend(tensor=package, dst=5)
                 if queue.qsize() > send_num:
                     send_opt.wait()
-                print("rank 4 send.......")
+                logger.debug('rank 4 send.....')
             elif dist.get_rank() == 5:
                 try:
                     rec_val = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
