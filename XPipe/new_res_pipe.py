@@ -14,7 +14,8 @@ import torchvision.transforms as transforms
 from utils import progress_bar
 import traceback
 from queue import Empty
-
+import psutil
+import os
 
 def train(queue, layer, e, loader=None, target_buffer=None):
 
@@ -41,6 +42,15 @@ def train(queue, layer, e, loader=None, target_buffer=None):
     package_size = 4
 
     send_num = 12
+
+
+
+
+    if dist.get_rank() == 1:
+        p = psutil.Process(os.getpid)
+        p.nice(10)
+
+    
 
     # if dist.get_rank() == 0:
     #     e.clear()
