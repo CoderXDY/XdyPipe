@@ -94,18 +94,22 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     dist.send(tensor=torch.zeros(1), dst=2)
                     e.wait()
                     break
-                rec_val.share_memory_()
-                queue.put(rec_val)
+                try:
+                    rec_val.share_memory_()
+                    queue.put(rec_val)
 
-                package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
-                for count in range(package_size):
-                    one_batch = rec_val[count]
-                    output_v = layer(one_batch)
-                    package[count] = output_v
-                send_opt = dist.isend(tensor=package, dst=2)
-                if queue.qsize() > send_num:
-                    send_opt.wait()
-                logger.error('rank 1 send....')
+                    package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
+                    for count in range(package_size):
+                        one_batch = rec_val[count]
+                        output_v = layer(one_batch)
+                        package[count] = output_v
+                    send_opt = dist.isend(tensor=package, dst=2)
+                    if queue.qsize() > send_num:
+                        send_opt.wait()
+                    logger.error('rank 1 send....')
+                except Exception as ee:
+                    t = time.time()
+                    logger.error('rank 1 failed-' + str(t), exc_info=True)
 
             elif dist.get_rank() == 2:
                 try:
