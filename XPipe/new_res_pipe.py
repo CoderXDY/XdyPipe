@@ -363,6 +363,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         dist.recv(tensor=back_grad_pack, src=10)
                 except RuntimeError as error:
                     access_stop_flag = True
+                    logger.error('rank 11 rumtime error', exe_info=True)
                 finally:
                     try:
                         input_v_pack = queue.get(block=True, timeout=2)
