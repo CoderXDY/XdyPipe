@@ -26,7 +26,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
     logger.addHandler(file_handler)
 
 
-    batch_size = 10
+    batch_size = 64
 
     all_loss = 0
     batch_idx = 0
@@ -137,7 +137,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 if queue.qsize() > send_num:
                     send_opt.wait()
                 logging.debug('rank 2 send.....')
-
+                print('rank 2 send.........')
             elif dist.get_rank() == 3:
                 try:
                     rec_val = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
@@ -160,6 +160,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                 if queue.qsize() > send_num:
                     send_opt.wait()
                 logging.debug('rank 3 send.......')
+                print('rank 3 send.....')
             elif dist.get_rank() == 4:
                 try:
                     rec_val = torch.zeros([package_size, batch_size, 256, 8, 8], requires_grad=True)
@@ -345,7 +346,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     access_stop_flag = True
                 finally:
                     try:
-                        input_v_pack = queue.get(block=True, timeout=2)
+                        input_v_pack = queue.get(block=True, timeout=3)
                     except Empty as empty:
                         logger.error('rank 10 wait.....')
                         dist.send(tensor=torch.zeros(1), dst=11)
@@ -371,13 +372,14 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     if not access_stop_flag:
                         back_grad_pack = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                         dist.recv(tensor=back_grad_pack, src=10)
+                        print('rank 10 recv....')
                 except RuntimeError as error:
                     access_stop_flag = True
                     logger.error('rank 11 rumtime error', exe_info=True)
                 finally:
                     try:
                         input_v_pack = queue.get(block=True, timeout=2)
-
+                        print("rank 10 queue get.......")
                     except Empty as empty:
                         logger.info('rank 10 start to stop....')
                         e.set()
@@ -443,12 +445,12 @@ if __name__ == "__main__":
     e = Event()
 
     buffer_queues = []
-    buffer_queues.append(Queue(100))
-    buffer_queues.append(Queue(100))
-    buffer_queues.append(Queue(100))
-    buffer_queues.append(Queue(100))
-    buffer_queues.append(Queue(100))
-    buffer_queues.append(Queue(100))
+    buffer_queues.append(Queue(400))
+    buffer_queues.append(Queue(400))
+    buffer_queues.append(Queue(400))
+    buffer_queues.append(Queue(400))
+    buffer_queues.append(Queue(400))
+    buffer_queues.append(Queue(400))
 
     layers = []
     input_layer = ResInputLayer()
@@ -491,7 +493,7 @@ if __name__ == "__main__":
     ])
 
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=False, transform=transform_train)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=1, drop_last=True)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=64, shuffle=True, num_workers=1, drop_last=True)
 
     transform_test = transforms.Compose([
         transforms.ToTensor(),
