@@ -426,9 +426,9 @@ if __name__ == "__main__":
     parser.add_argument('-path', help='the path fo share file system')
     parser.add_argument('-rank', type=int, help='the rank of process')
 
-    parser.add_argument('buffer_size', help='the size of buffer queue caching the batch data')
+    parser.add_argument('-buffer_size', type=int, help='the size of buffer queue caching the batch data')
 
-    parser.add_argument('layer_type', type=int, help='type of layer: input:0, block:1, output:2')
+    parser.add_argument('-layer_type', type=int, help='type of layer: input:0, block:1, output:2')
 
     parser.add_argument('-basic', help='if True, using basicblock for ResNet, else use Bottleneck')
     parser.add_argument('-out_plane', type=int, help='out_plane for cnn')
@@ -475,7 +475,7 @@ if __name__ == "__main__":
         layer = ResOutputLayer(BasicBlock if args.basic == 'True' else Bottleneck)
     layer.share_memory()
 
-    f_p = Process(target=init_processes, args=(run, args, queue, layer, rank, e))
+    f_p = Process(target=init_processes, args=(run, args, queue, layer, args.rank, e))
     f_p.start()
     b_p = Process(target=init_processes, args=(run, args, queue, layer, (11 - args.rank), e))
     b_p.start()
