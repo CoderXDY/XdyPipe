@@ -26,7 +26,7 @@ def train(queue, layer, e, loader=None, target_buffer=None):
     logger.addHandler(file_handler)
 
 
-    batch_size = 64
+    batch_size = 128
 
     all_loss = 0
     batch_idx = 0
@@ -38,13 +38,13 @@ def train(queue, layer, e, loader=None, target_buffer=None):
     access_stop_flag = False
 
 
-    package_size = 1
+    package_size = 4
 
-    send_num = 1
+    send_num = 4
 
 
-    # if dist.get_rank() == 0:
-    #     e.clear()
+    logger.debug('rank - ' + str(dist.get_rank()) + ' start........')
+
     if loader is not None and dist.get_rank() == 0:
         data_iter = iter(loader)
     try:
@@ -95,22 +95,18 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                     dist.send(tensor=torch.zeros(1), dst=2)
                     e.wait()
                     break
-                try:
-                    rec_val.share_memory_()
-                    queue.put(rec_val)
+                rec_val.share_memory_()
+                queue.put(rec_val)
 
-                    package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
-                    for count in range(package_size):
-                        one_batch = rec_val[count]
-                        output_v = layer(one_batch)
-                        package[count] = output_v
-                    send_opt = dist.isend(tensor=package, dst=2)
-                    if queue.qsize() > send_num:
-                        send_opt.wait()
-                    logger.error('rank 1 send....')
-                except Exception as ee:
-                    t = time.time()
-                    logger.error('rank 1 failed-' + str(t), exc_info=True)
+                package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
+                for count in range(package_size):
+                    one_batch = rec_val[count]
+                    output_v = layer(one_batch)
+                    package[count] = output_v
+                send_opt = dist.isend(tensor=package, dst=2)
+                if queue.qsize() > send_num:
+                    send_opt.wait()
+                logger.error('rank 1 send....')
 
             elif dist.get_rank() == 2:
                 try:
@@ -245,7 +241,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         package[count] = input_v.grad
 
                     send_opt = dist.isend(tensor=package, dst=7)
-                    #send_opt.wait()
                     logger.error('rank 6 send.....')
             elif dist.get_rank() == 7:
                 try:
@@ -275,7 +270,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         optimizer.step()
                         package[count] = input_v.grad
                     send_opt = dist.isend(tensor=package, dst=8)
-                    #send_opt.wait()
                     logger.error('rank 7 send....')
             elif dist.get_rank() == 8:
                 try:
@@ -305,7 +299,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         optimizer.step()
                         package[count] = input_v.grad
                     send_opt = dist.isend(tensor=package, dst=9)
-                    #send_opt.wait()
                     logger.error('rank 8 send.....')
 
             elif dist.get_rank() == 9:
@@ -335,7 +328,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         optimizer.step()
                         package[count] = input_v.grad
                     send_opt = dist.isend(tensor=package, dst=10)
-                    #send_opt.wait()
                     logger.error('rank 9 send....')
             elif dist.get_rank() == 10:
                 try:
@@ -364,7 +356,6 @@ def train(queue, layer, e, loader=None, target_buffer=None):
                         optimizer.step()
                         package[count] = input_v.grad
                     send_opt=dist.isend(tensor=package, dst=11)
-                    #send_opt.wait()
                     logger.error('rank 10 send......')
 
             elif dist.get_rank() == 11:
