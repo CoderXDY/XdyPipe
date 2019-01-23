@@ -1,0 +1,60 @@
+#!/bin/sh
+shopt -s expand_aliases
+source /HOME/sysu_wgwu_4/.bashrc
+rank=$1
+path=$2
+size=12
+buffer_size=20
+num_block=2
+batch_size=32
+data_worker=1
+epoch=200
+package_size=4
+send_num=12
+epoch=200
+case $rank in
+    0)
+    layer_type=0
+    basic='True'
+    out_plane=64
+    stride=1
+    in_plane=1
+    ;;
+    1)
+    layer_type=1
+    basic='True'
+    out_plane=64
+    stride=1
+    in_plane=64
+    ;;
+    2)
+    layer_type=1
+    basic='True'
+    out_plane=128
+    stride=2
+    in_plane=64
+    ;;
+    3)
+    layer_type=1
+    basic='True'
+    out_plane=256
+    stride=2
+    in_plane=128
+    ;;
+    4)
+    layer_type=1
+    basic='True'
+    out_plane=512
+    stride=2
+    in_plane=256
+    ;;
+    5)
+    layer_type=2
+    basic='True'
+    out_plane=64
+    stride=1
+    in_plane=1
+    ;;
+esac
+arg = " -size $size -path $path -rank $rank -buffer_size $buffer_size -layer_type $layer_type -basic $basic -out_plane $out_plane -num_block $num_block -stride $stride -in_plane $in_plane -batch_size $batch_size -data_worker $data_worker -epoch $epoch -package_size $package_size -send_num $send_num "
+python "/HOME/sysu_wgwu_4/xpipe/XPipe/sc_res_pipe.py"$arg"  > _run_$i.log 2>&1"

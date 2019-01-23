@@ -422,11 +422,11 @@ def init_processes(fn, args, queue, layer, rank, e):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-size', type=int, help='input the sum of node')
+    parser.add_argument('-size', type=int, help='input the sum of node', default=12)
     parser.add_argument('-path', help='the path fo share file system')
     parser.add_argument('-rank', type=int, help='the rank of process')
 
-    parser.add_argument('-buffer_size', type=int, help='the size of buffer queue caching the batch data')
+    parser.add_argument('-buffer_size', type=int, help='the size of buffer queue caching the batch data', default=16)
 
     parser.add_argument('-layer_type', type=int, help='type of layer: input:0, block:1, output:2')
 
