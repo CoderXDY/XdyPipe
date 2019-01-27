@@ -1,0 +1,26 @@
+ps -efww|grep -w 'python'|grep -v grep|cut -c 9-15|xargs kill -9
+
+python res_pipe_master.py -ip 89.72.2.41 -path /WORK/sysu_wgwu_4/xpipe/XPipe/temp
+
+python /WORK/sysu_wgwu_4/xpipe/XPipe/res_pipe_worker.py -ip 89.72.2.41 -size 12 -path file:///WORK/sysu_wgwu_4/xpipe/XPipe/temp -rank 0 -buffer_size 20 -layer_type 0 -basic True -out_plane 64 -num_block 2 -stride 1 -in_plane 1 -batch_size 32 -data_worker 1 -epoch 200 -package_size 4 -send_num 12
+
+
+python /WORK/sysu_wgwu_4/xpipe/XPipe/res_pipe_worker.py -ip 89.72.2.41 -size 12 -path file:///WORK/sysu_wgwu_4/xpipe/XPipe/temp -rank 1 -buffer_size 20 -layer_type 1 -basic True -out_plane 64 -num_block 2 -stride 1 -in_plane 64 -batch_size 32 -data_worker 1 -epoch 200 -package_size 4 -send_num 12
+
+
+python /WORK/sysu_wgwu_4/xpipe/XPipe/res_pipe_worker.py -ip 89.72.2.41 -size 12 -path file:///WORK/sysu_wgwu_4/xpipe/XPipe/temp -rank 2 -buffer_size 20 -layer_type 1 -basic True -out_plane 128 -num_block 2 -stride 2 -in_plane 64 -batch_size 32 -data_worker 1 -epoch 200 -package_size 4 -send_num 12
+
+python /WORK/sysu_wgwu_4/xpipe/XPipe/res_pipe_worker.py -ip 89.72.2.41 -size 12 -path file:///WORK/sysu_wgwu_4/xpipe/XPipe/temp -rank 3 -buffer_size 20 -layer_type 1 -basic True -out_plane 256 -num_block 2 -stride 2 -in_plane 128 -batch_size 32 -data_worker 1 -epoch 200 -package_size 4 -send_num 12
+
+
+python /WORK/sysu_wgwu_4/xpipe/XPipe/res_pipe_worker.py -ip 89.72.2.41 -size 12 -path file:///WORK/sysu_wgwu_4/xpipe/XPipe/temp -rank 4 -buffer_size 20 -layer_type 1 -basic True -out_plane 512 -num_block 2 -stride 2 -in_plane 256 -batch_size 32 -data_worker 1 -epoch 200 -package_size 4 -send_num 12
+
+python /WORK/sysu_wgwu_4/xpipe/XPipe/res_pipe_worker.py -ip 89.72.2.41 -size 12 -path file:///WORK/sysu_wgwu_4/xpipe/XPipe/temp -rank 5 -buffer_size 20 -layer_type 2 -basic True -out_plane 64 -num_block 2 -stride 1 -in_plane 1 -batch_size 32 -data_worker 1 -epoch 200 -package_size 4 -send_num 12
+
+
+
+
+
+
+
+
