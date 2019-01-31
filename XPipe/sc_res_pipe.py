@@ -213,9 +213,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         _, predicted = output_v.max(1)
                         total += target_v.size(0)
                         correct += predicted.eq(target_v).sum().item()
-
-                        progress_bar(batch_idx, len(loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                                 % (all_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                        print('batch_idx: %d | len: %d | Loss: %.3f | Acc: %.3f%% (%d/%d)' % (batch_idx, len(loader), all_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                        #progress_bar(batch_idx, len(loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)' % (all_loss / (batch_idx + 1), 100. * correct / total, correct, total))
                         package[count] = input_v.grad
 
                     dist.isend(tensor=package, dst=7)
@@ -395,7 +394,7 @@ def init_processes(fn, args, queue, layer, rank, e):
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
 
-        trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=False, transform=transform_train)
+        trainset = torchvision.datasets.CIFAR10(root='../data', train=True, download=False, transform=transform_train)
         trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True,
                                                   num_workers=args.data_worker, drop_last=True)
 
@@ -404,7 +403,7 @@ def init_processes(fn, args, queue, layer, rank, e):
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
 
-        testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform_test)
+        testset = torchvision.datasets.CIFAR10(root='../data', train=False, download=False, transform=transform_test)
         testloader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size, shuffle=False,
                                                  num_workers=args.data_worker, drop_last=True)
 
@@ -482,4 +481,3 @@ if __name__ == "__main__":
 
     f_p.join()
     b_p.join()
-

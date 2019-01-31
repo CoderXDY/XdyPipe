@@ -14,8 +14,9 @@ import torchvision
 import torchvision.transforms as transforms
 from utils import progress_bar
 import traceback
-from queue import Empty
+from queue import Empty, Full
 import os
+import psutil
 
 """
  pipeline ResNet script for Tianhe-2
@@ -25,7 +26,7 @@ import os
 def train(queue, layer, e, args, loader=None, target_buffer=None):
 
     logger = logging.getLogger('rank-' +str(dist.get_rank()))
-    file_handler = logging.FileHandler('rank-' + str(dist.get_rank()) + '.log')
+    file_handler = logging.FileHandler('/WORK/sysu_wgwu_4/xpipe/XPipe/rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(levelname)s:%(asctime)s | pricess_id-%(process)d | %(funcName)s->%(lineno)d | %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
@@ -46,8 +47,15 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
 
     queue_wait = 5
 
-    if loader is not None and dist.get_rank() == 0:
+    point = 0
+    time_sleep = 6
+
+
+
+    if loader is not None and (dist.get_rank() == 0 or dist.get_rank() == 6):
         data_iter = iter(loader)
+
+
     try:
         while True:
 
@@ -55,17 +63,28 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                 package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                 try:
                     input_v_pack = torch.zeros([package_size, batch_size, 3, 32, 32], requires_grad=True)
-                    target_v_pack = torch.zeros([package_size, batch_size], dtype=torch.long)
+                    #target_v_pack = torch.zeros([package_size, batch_size], dtype=torch.long)
                     for count in range(package_size):
                         input_v, target_v = next(data_iter)
                         input_v_pack[count] = input_v
-                        target_v_pack[count] = target_v
+                        #target_v_pack[count] = target_v
                         output_v = layer(input_v)
                         package[count] = output_v
                     input_v_pack.share_memory_()
-                    queue.put(input_v_pack)
-                    target_v_pack.share_memory_()
-                    target_buffer.put(target_v_pack)
+                    try:
+                        queue.put(input_v_pack, timeout=queue_wait)
+                    except Full as full:
+                        logger.error("queue full.......")
+                        time.sleep(time_sleep)
+                        wait_temp = queue_wait * 2
+                        queue.put(input_v_pack, timeout=wait_temp)
+                        dist.send(tensor=package, dst=1)
+                        logger.error('full wait and rank 0 send.....')
+                        continue
+
+                    #target_v_pack.share_memory_()
+                    #target_buffer.put(target_v_pack)
+
                 except StopIteration as stop_e:
                     if epoch < max_epoch:
                         logger.error('rank-%s: epoch-%s start...', str(dist.get_rank()), str(epoch))
@@ -97,13 +116,21 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     e.wait()
                     break
                 rec_val.share_memory_()
-                queue.put(rec_val)
-
                 package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                 for count in range(package_size):
                     one_batch = rec_val[count]
                     output_v = layer(one_batch)
                     package[count] = output_v
+                try:
+                    queue.put(rec_val, timeout=queue_wait)
+                except Full as full:
+                    time.sleep(time_sleep)
+                    wait_temp = queue_wait * 2
+                    queue.put(rec_val, timeout=wait_temp)
+                    dist.send(tensor=package, dst=2)
+                    logger.error('full wait and rank 1 send....')
+                    continue
+
                 # send_opt = dist.isend(tensor=package, dst=2)
                 # if queue.qsize() > send_num:
                 #     #print("rank 1 wait....")
@@ -121,13 +148,20 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     e.wait()
                     break
                 rec_val.share_memory_()
-                queue.put(rec_val)
-
                 package = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
                 for count in range(package_size):
                     one_batch = rec_val[count]
                     output_v = layer(one_batch)
                     package[count] = output_v
+                try:
+                    queue.put(rec_val, timeout=queue_wait)
+                except Full as full:
+                    time.sleep(time_sleep)
+                    wait_temp = queue_wait * 2
+                    queue.put(rec_val, timeout=wait_temp)
+                    dist.send(tensor=package, dst=3)
+                    logging.error('full wait and rank 2 send.....')
+                    continue
                 # send_opt = dist.isend(tensor=package, dst=3)
                 # if queue.qsize() > send_num:
                 #     #print("rank 2 wait.....")
@@ -144,13 +178,20 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     e.wait()
                     break
                 rec_val.share_memory_()
-                queue.put(rec_val)
-
                 package = torch.zeros([package_size, batch_size, 256, 8, 8], requires_grad=True)
                 for count in range(package_size):
                     one_batch = rec_val[count]
                     output_v = layer(one_batch)
                     package[count] = output_v
+                try:
+                    queue.put(rec_val, timeout=queue_wait)
+                except Full as full:
+                    time.sleep(time_sleep)
+                    wait_temp = queue_wait * 2
+                    queue.put(rec_val, timeout=wait_temp)
+                    dist.send(tensor=package, dst=4)
+                    logging.error('full wait rank 3 send.......')
+                    continue
                 # send_opt = dist.isend(tensor=package, dst=4)
                 # if queue.qsize() > send_num:
                 #     #print("rank 3 wait....")
@@ -167,13 +208,20 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     e.wait()
                     break
                 rec_val.share_memory_()
-                queue.put(rec_val)
-
                 package = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
                 for count in range(package_size):
                     one_batch = rec_val[count]
                     output_v = layer(one_batch)
                     package[count] = output_v
+                try:
+                    queue.put(rec_val, timeout=queue_wait)
+                except Full as full:
+                    time.sleep(time_sleep)
+                    wait_temp = queue_wait * 2
+                    queue.put(rec_val, timeout=wait_temp)
+                    dist.send(tensor=package, dst=5)
+                    logger.error('full wait and rank 4 send.....')
+                    continue
                 dist.send(tensor=package, dst=5)
                 # send_opt = dist.isend(tensor=package, dst=5)
                 # if queue.qsize() > send_num:
@@ -190,7 +238,16 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     e.wait()
                     break
                 rec_val.share_memory_()
-                queue.put(rec_val)
+                try:
+                    queue.put(rec_val, timeout=queue_wait)
+                except:
+                    time.sleep(time_sleep)
+                    wait_temp = queue_wait * 2
+                    queue.put(rec_val, timeout=wait_temp)
+                    dist.send(tensor=torch.randn(2), dst=6)
+                    logger.error('full wait and rank 5 send......')
+                    continue
+
                 dist.send(tensor=torch.randn(2), dst=6)
                 # send_opt = dist.isend(tensor=torch.randn(2), dst=6)
                 # if queue.qsize() > send_num:
@@ -199,6 +256,7 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                 logger.error('rank 5 send......')
                 #print("rank 5 send....")
             elif dist.get_rank() == 6:
+                logger.error("rank 6 run....")
                 try:
                     if not access_stop_flag:
                         rec_val = torch.zeros(2)
@@ -215,7 +273,12 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         e.wait()
                         break
                     package = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
-                    target_v_pack = target_buffer.get()
+                    target_v_pack = torch.zeros([package_size, batch_size], dtype=torch.long)
+                    for count in range(package_size):
+                        _, target_temp = next(data_iter)
+                        target_v_pack[count] = target_temp
+
+                    #target_v_pack = target_buffer.get()
                     for count in range(package_size):
                         input_v = rec_pack[count]
                         input_v.requires_grad_()
@@ -396,6 +459,22 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         optimizer.zero_grad()
                         output_v.backward(back_grad)
                         optimizer.step()
+            if point % 10 == 0:
+                mem = psutil.virtual_memory()
+                swp = psutil.swap_memory()
+                cpu = psutil.cpu_times()
+                netio = psutil.net_io_counters()
+                pid = os.getpid()
+                p = psutil.Process(pid)
+                logger.error("record-" + str(point) + "....")
+                logger.error(str(cpu))
+                logger.error(str(mem))
+                logger.error(str(swp))
+                logger.error(str(netio))
+                logger.error("process status:" + str(p.status()))
+                logger.error(str(p.cpu_times()))
+                logger.error(str(p.memory_info()))
+            point += 1
         logger.info('rank-%s stop....', str(dist.get_rank()))
         #print("rank-" + str(dist.get_rank()) + " stop.......")
     except Exception as e:
@@ -424,7 +503,7 @@ def init_processes(fn, args, queue, layer, rank, e):
     print("init process-" + str(rank) + "....")
     dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=rank)
 
-    if rank == 0:
+    if rank == 0 or rank == 6:
 
         transform_train = transforms.Compose([
             transforms.RandomCrop(32, padding=4),
@@ -434,7 +513,7 @@ def init_processes(fn, args, queue, layer, rank, e):
         ])
 
         trainset = torchvision.datasets.CIFAR10(root='../data', train=True, download=False, transform=transform_train)
-        trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True,
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=False,
                                                   num_workers=args.data_worker, drop_last=True)
 
         transform_test = transforms.Compose([
@@ -448,14 +527,12 @@ def init_processes(fn, args, queue, layer, rank, e):
 
         classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
-    if rank == 0 or rank == 6:
-        target_buffer = Queue(args.buffer_size)
-
+    target_buffer = None
     if rank == 0:
         fn(queue, layer, e, args, train_loader=trainloader, test_loader=testloader,
            target_buffer=target_buffer)
     elif rank == 6:
-        fn(queue, layer, e, args, target_buffer=target_buffer)
+        fn(queue, layer, e, args, train_loader=trainloader, target_buffer=target_buffer)
     else:
         fn(queue, layer, e, args)
 
@@ -505,10 +582,18 @@ if __name__ == "__main__":
     time.sleep(2)
 
     bm.register('get_event')
+    #bm.register('get_queue')
     m = bm(address=(args.ip, 5000), authkey=b'xpipe')
     m.connect()
     e = m.get_event()
 
+    # target_queue = None
+    #
+    # if args.rank == 0 or args.rank == 6:
+    #     target_queue = m.get_queue()
+    #     target_queue.put(0)
+    #     a = target_queue.get()
+    #     print("a:" + a)
     queue = Queue(args.buffer_size)
 
     if args.layer_type == 0:
@@ -527,6 +612,5 @@ if __name__ == "__main__":
     f_p.start()
     b_p = Process(target=init_processes, args=(run, args, queue, layer, (11 - args.rank), e))
     b_p.start()
-
     f_p.join()
     b_p.join()
