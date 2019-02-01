@@ -19,7 +19,7 @@ import os
 import psutil
 
 """
- pipeline ResNet script for Tianhe-2
+ pipeline ResNet script for Tianhe-2  memory optim
 
 """
 
