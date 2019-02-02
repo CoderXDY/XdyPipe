@@ -19,7 +19,7 @@ import os
 import psutil
 
 """
- pipeline ResNet script for Tianhe-2  memory optim
+ pipeline ResNet script for Tianhe-2  no memory optim
 
 """
 
@@ -63,56 +63,36 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                 package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                 try:
                     input_v_pack = torch.zeros([package_size, batch_size, 3, 32, 32], requires_grad=True)
-                    #target_v_pack = torch.zeros([package_size, batch_size], dtype=torch.long)
                     for count in range(package_size):
                         input_v, target_v = next(data_iter)
                         input_v_pack[count] = input_v
-                        #target_v_pack[count] = target_v
                         output_v = layer(input_v)
                         package[count] = output_v
                     input_v_pack.share_memory_()
-                    try:
-                        queue.put(input_v_pack, timeout=queue_wait)
-                    except Full as full:
-                        logger.error("queue full.......")
-                        time.sleep(time_sleep)
-                        wait_temp = queue_wait * 2
-                        queue.put(input_v_pack, timeout=wait_temp)
-                        dist.send(tensor=package, dst=1)
-                        logger.error('full wait and rank 0 send.....')
-                        continue
-
-                    #target_v_pack.share_memory_()
-                    #target_buffer.put(target_v_pack)
-
+                    queue.put(input_v_pack)
                 except StopIteration as stop_e:
                     if epoch < max_epoch:
                         logger.error('rank-%s: epoch-%s start...', str(dist.get_rank()), str(epoch))
                         epoch += 1
-                        #print("epoch-" + str(epoch) + " start........")
                         data_iter = iter(loader)
                         continue
                     else:
                         logger.error('iteration end successfully......')
-                        #print("iter end......")
-                        dist.send(tensor=torch.zeros(1), dst=1)
+                        send_opt = dist.isend(tensor=torch.zeros(1), dst=1)
+                        send_opt.wait()
                         e.wait()
                         break
-                dist.send(tensor=package, dst=1)
+                send_opt = dist.isend(tensor=package, dst=1)
+                send_opt.wait()
                 logger.error('rank 0 send.....')
-                # send_opt = dist.isend(tensor=package, dst=1)
-                # if queue.qsize() > send_num:
-                #     #print("rank 0 wait....")
-                #     send_opt.wait()
-                # logger.error('rank 0 send.....')
-                #print("rank 0 send.....")
 
             elif dist.get_rank() == 1:
                 try:
                     rec_val = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                     dist.recv(tensor=rec_val, src=0)
                 except RuntimeError as error:
-                    dist.send(tensor=torch.zeros(1), dst=2)
+                    send_opt = dist.isend(tensor=torch.zeros(1), dst=2)
+                    send_opt.wait()
                     e.wait()
                     break
                 rec_val.share_memory_()
@@ -121,22 +101,10 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     one_batch = rec_val[count]
                     output_v = layer(one_batch)
                     package[count] = output_v
-                try:
-                    queue.put(rec_val, timeout=queue_wait)
-                except Full as full:
-                    time.sleep(time_sleep)
-                    wait_temp = queue_wait * 2
-                    queue.put(rec_val, timeout=wait_temp)
-                    dist.send(tensor=package, dst=2)
-                    logger.error('full wait and rank 1 send....')
-                    continue
+                queue.put(rec_val)
 
-                # send_opt = dist.isend(tensor=package, dst=2)
-                # if queue.qsize() > send_num:
-                #     #print("rank 1 wait....")
-                #     send_opt.wait()
-                # #print("rank 1 send.....")
-                dist.send(tensor=package, dst=2)
+                send_opt = dist.isend(tensor=package, dst=2)
+                send_opt.wait()
                 logger.error('rank 1 send....')
 
             elif dist.get_rank() == 2:
@@ -144,7 +112,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     rec_val = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                     dist.recv(tensor=rec_val, src=1)
                 except RuntimeError as error:
-                    dist.send(tensor=torch.zeros(1), dst=3)
+                    send_opt = dist.isend(tensor=torch.zeros(1), dst=3)
+                    send_opt.wait()
                     e.wait()
                     break
                 rec_val.share_memory_()
@@ -153,28 +122,17 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     one_batch = rec_val[count]
                     output_v = layer(one_batch)
                     package[count] = output_v
-                try:
-                    queue.put(rec_val, timeout=queue_wait)
-                except Full as full:
-                    time.sleep(time_sleep)
-                    wait_temp = queue_wait * 2
-                    queue.put(rec_val, timeout=wait_temp)
-                    dist.send(tensor=package, dst=3)
-                    logging.error('full wait and rank 2 send.....')
-                    continue
-                # send_opt = dist.isend(tensor=package, dst=3)
-                # if queue.qsize() > send_num:
-                #     #print("rank 2 wait.....")
-                #     send_opt.wait()
-                #print("rank 2 send.....")
-                dist.send(tensor=package, dst=3)
+                queue.put(rec_val)
+                send_opt = dist.isend(tensor=package, dst=3)
+                send_opt.wait()
                 logging.error('rank 2 send.....')
             elif dist.get_rank() == 3:
                 try:
                     rec_val = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
                     dist.recv(tensor=rec_val, src=2)
                 except RuntimeError as error:
-                    dist.send(tensor=torch.zeros(1), dst=4)
+                    send_opt = dist.isend(tensor=torch.zeros(1), dst=4)
+                    send_opt.wait()
                     e.wait()
                     break
                 rec_val.share_memory_()
@@ -183,20 +141,9 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     one_batch = rec_val[count]
                     output_v = layer(one_batch)
                     package[count] = output_v
-                try:
-                    queue.put(rec_val, timeout=queue_wait)
-                except Full as full:
-                    time.sleep(time_sleep)
-                    wait_temp = queue_wait * 2
-                    queue.put(rec_val, timeout=wait_temp)
-                    dist.send(tensor=package, dst=4)
-                    logging.error('full wait rank 3 send.......')
-                    continue
-                # send_opt = dist.isend(tensor=package, dst=4)
-                # if queue.qsize() > send_num:
-                #     #print("rank 3 wait....")
-                #     send_opt.wait()
-                dist.send(tensor=package, dst=4)
+                queue.put(rec_val)
+                send_opt = dist.isend(tensor=package, dst=4)
+                send_opt.wait()
                 logging.error('rank 3 send.......')
                 #print("rank 3 send.....")
             elif dist.get_rank() == 4:
@@ -204,7 +151,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     rec_val = torch.zeros([package_size, batch_size, 256, 8, 8], requires_grad=True)
                     dist.recv(tensor=rec_val, src=3)
                 except RuntimeError as error:
-                    dist.send(tensor=torch.zeros(1), dst=5)
+                    send_opt = dist.isend(tensor=torch.zeros(1), dst=5)
+                    send_opt.wait()
                     e.wait()
                     break
                 rec_val.share_memory_()
@@ -213,20 +161,9 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     one_batch = rec_val[count]
                     output_v = layer(one_batch)
                     package[count] = output_v
-                try:
-                    queue.put(rec_val, timeout=queue_wait)
-                except Full as full:
-                    time.sleep(time_sleep)
-                    wait_temp = queue_wait * 2
-                    queue.put(rec_val, timeout=wait_temp)
-                    dist.send(tensor=package, dst=5)
-                    logger.error('full wait and rank 4 send.....')
-                    continue
-                dist.send(tensor=package, dst=5)
-                # send_opt = dist.isend(tensor=package, dst=5)
-                # if queue.qsize() > send_num:
-                #     #print("rank 4 wait...")
-                #     send_opt.wait()
+                queue.put(rec_val)
+                send_opt = dist.isend(tensor=package, dst=5)
+                send_opt.wait()
                 logger.error('rank 4 send.....')
                 #print("rank 4 send.......")
             elif dist.get_rank() == 5:
@@ -234,25 +171,14 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     rec_val = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
                     dist.recv(tensor=rec_val, src=4)
                 except RuntimeError as error:
-                    dist.send(tensor=torch.zeros(1), dst=6)
+                    send_opt = dist.isend(tensor=torch.zeros(1), dst=6)
+                    send_opt.wait()
                     e.wait()
                     break
                 rec_val.share_memory_()
-                try:
-                    queue.put(rec_val, timeout=queue_wait)
-                except:
-                    time.sleep(time_sleep)
-                    wait_temp = queue_wait * 2
-                    queue.put(rec_val, timeout=wait_temp)
-                    dist.send(tensor=torch.randn(2), dst=6)
-                    logger.error('full wait and rank 5 send......')
-                    continue
-
-                dist.send(tensor=torch.randn(2), dst=6)
-                # send_opt = dist.isend(tensor=torch.randn(2), dst=6)
-                # if queue.qsize() > send_num:
-                #     #print("rank 5 wait......")
-                #     send_opt.wait()
+                queue.put(rec_val)
+                send_opt = dist.isend(tensor=torch.randn(2), dst=6)
+                send_opt.wait()
                 logger.error('rank 5 send......')
                 #print("rank 5 send....")
             elif dist.get_rank() == 6:
@@ -269,7 +195,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     except Empty as empty:
                         logger.error('rank 6 prepare to end....')
                         #print("rank 6 prepare to end....")
-                        dist.send(tensor=torch.zeros(1), dst=7)
+                        send_opt = dist.isend(tensor=torch.zeros(1), dst=7)
+                        send_opt.wait()
                         e.wait()
                         break
                     package = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
@@ -303,7 +230,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         logger.error('batch_idx: %d | Loss: %.3f | Acc: %.3f%% (%d/%d)' % (batch_idx, all_loss / (batch_idx + 1), 100. * correct / total, correct, total))
                         #progress_bar(batch_idx, len(loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)' % (all_loss / (batch_idx + 1), 100. * correct / total, correct, total))
                         package[count] = input_v.grad
-                    dist.send(tensor=package, dst=7)
+                    send_opt = dist.isend(tensor=package, dst=7)
+                    send_opt.wait()
                     #dist.isend(tensor=package, dst=7)
                     logger.error('rank 6 send.....')
                     #print("rank 6 send....")
@@ -320,7 +248,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     except Empty as empty:
                         logger.error('rank 7 prepare to end.....')
                         #print("rank 7 prepare to end.....")
-                        dist.send(tensor=torch.zeros(1), dst=8)
+                        send_opt = dist.isend(tensor=torch.zeros(1), dst=8)
+                        send_opt.wait()
                         e.wait()
                         break
                     package = torch.zeros([package_size, batch_size, 256, 8, 8], requires_grad=True)
@@ -335,7 +264,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         output_v.backward(back_grad)
                         optimizer.step()
                         package[count] = input_v.grad
-                    dist.send(tensor=package, dst=8)
+                    send_opt = dist.isend(tensor=package, dst=8)
+                    send_opt.wait()
                     #dist.isend(tensor=package, dst=8)
                     logger.error('rank 7 send....')
                     #print("rank 7 send.....")
@@ -352,7 +282,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     except Empty as empty:
                         logger.error('rank 8 prepare to end.....')
                         #print("rank 8 prepare to end.....")
-                        dist.send(tensor=torch.zeros(1), dst=9)
+                        send_opt = dist.isend(tensor=torch.zeros(1), dst=9)
+                        send_opt.wait()
                         e.wait()
                         break
                     package = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
@@ -368,7 +299,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         optimizer.step()
                         package[count] = input_v.grad
                     #dist.isend(tensor=package, dst=9)
-                    dist.send(tensor=package, dst=9)
+                    send_opt = dist.isend(tensor=package, dst=9)
+                    send_opt.wait()
                     logger.error('rank 8 send.....')
                     #print("rank 8 send......")
 
@@ -385,7 +317,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     except Empty as empty:
                         logger.error('rank 9 prepare to end....')
                         #print("rank 9 prepare to end......")
-                        dist.send(tensor=torch.zeros(1), dst=10)
+                        send_opt = dist.isend(tensor=torch.zeros(1), dst=10)
+                        send_opt.wait()
                         e.wait()
                         break
                     package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
@@ -399,7 +332,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         output_v.backward(back_grad)
                         optimizer.step()
                         package[count] = input_v.grad
-                    dist.send(tensor=package, dst=10)
+                    send_opt = dist.isend(tensor=package, dst=10)
+                    send_opt.wait()
                     #dist.isend(tensor=package, dst=10)
                     logger.error('rank 9 send....')
                     #print("rank 9 send......")
@@ -416,7 +350,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     except Empty as empty:
                         logger.error('rank 10 prepare to end.....')
                         #print("rank 10 prepare to end.....")
-                        dist.send(tensor=torch.zeros(1), dst=11)
+                        send_opt = dist.isend(tensor=torch.zeros(1), dst=11)
+                        send_opt.wait()
                         e.wait()
                         break
                     package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
@@ -430,7 +365,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         output_v.backward(back_grad)
                         optimizer.step()
                         package[count] = input_v.grad
-                    dist.send(tensor=package, dst=11)
+                    send_opt = dist.isend(tensor=package, dst=11)
+                    send_opt.wait()
                     #dist.isend(tensor=package, dst=11)
                     logger.error('rank 10 send......')
                     #print("rank 10 send.....")
