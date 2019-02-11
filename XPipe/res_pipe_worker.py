@@ -17,6 +17,7 @@ import traceback
 from queue import Empty, Full
 import os
 import psutil
+import gc
 
 """
  pipeline ResNet script for Tianhe-2  no memory optim
@@ -95,14 +96,17 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     send_opt.wait()
                     e.wait()
                     break
-                rec_val.share_memory_()
-                package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
+
+                """package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                 for count in range(package_size):
                     one_batch = rec_val[count]
                     output_v = layer(one_batch)
-                    package[count] = output_v
+                    package[count] = output_v"""
+                package = torch.zeros([package_size, batch_size, 64, 32, 32])
+                for count in range(package_size):
+                    package[count] = layer(rec_val[count])
+                rec_val.share_memory_()
                 queue.put(rec_val)
-
                 send_opt = dist.isend(tensor=package, dst=2)
                 send_opt.wait()
                 logger.error('rank 1 send....')
@@ -116,12 +120,13 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     send_opt.wait()
                     e.wait()
                     break
-                rec_val.share_memory_()
+
                 package = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
                 for count in range(package_size):
                     one_batch = rec_val[count]
                     output_v = layer(one_batch)
                     package[count] = output_v
+                rec_val.share_memory_()
                 queue.put(rec_val)
                 send_opt = dist.isend(tensor=package, dst=3)
                 send_opt.wait()
@@ -135,12 +140,13 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     send_opt.wait()
                     e.wait()
                     break
-                rec_val.share_memory_()
+
                 package = torch.zeros([package_size, batch_size, 256, 8, 8], requires_grad=True)
                 for count in range(package_size):
                     one_batch = rec_val[count]
                     output_v = layer(one_batch)
                     package[count] = output_v
+                rec_val.share_memory_()
                 queue.put(rec_val)
                 send_opt = dist.isend(tensor=package, dst=4)
                 send_opt.wait()
@@ -155,12 +161,13 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     send_opt.wait()
                     e.wait()
                     break
-                rec_val.share_memory_()
+
                 package = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
                 for count in range(package_size):
                     one_batch = rec_val[count]
                     output_v = layer(one_batch)
                     package[count] = output_v
+                rec_val.share_memory_()
                 queue.put(rec_val)
                 send_opt = dist.isend(tensor=package, dst=5)
                 send_opt.wait()
@@ -417,8 +424,6 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
         logger.error('rank-' + str(dist.get_rank()) + ' fail: ', exc_info=True)
         #print(e)
         return
-
-
 
 
 
