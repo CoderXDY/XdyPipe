@@ -20,7 +20,7 @@ import psutil
 import gc
 
 """
- pipeline ResNet script for Tianhe-2  no memory optim
+ pipeline ResNet script for Tianhe-2  with gpu cluster
 
 """
 
@@ -96,12 +96,6 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     send_opt.wait()
                     e.wait()
                     break
-
-                """package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
-                for count in range(package_size):
-                    one_batch = rec_val[count]
-                    output_v = layer(one_batch)
-                    package[count] = output_v"""
                 package = torch.zeros([package_size, batch_size, 64, 32, 32])
                 for count in range(package_size):
                     package[count] = layer(rec_val[count])
@@ -123,9 +117,7 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
 
                 package = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
                 for count in range(package_size):
-                    one_batch = rec_val[count]
-                    output_v = layer(one_batch)
-                    package[count] = output_v
+                    package[count] = layer(rec_val[count])
                 rec_val.share_memory_()
                 queue.put(rec_val)
                 send_opt = dist.isend(tensor=package, dst=3)
@@ -143,9 +135,7 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
 
                 package = torch.zeros([package_size, batch_size, 256, 8, 8], requires_grad=True)
                 for count in range(package_size):
-                    one_batch = rec_val[count]
-                    output_v = layer(one_batch)
-                    package[count] = output_v
+                    package[count] = layer(rec_val[count])
                 rec_val.share_memory_()
                 queue.put(rec_val)
                 send_opt = dist.isend(tensor=package, dst=4)
@@ -164,9 +154,7 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
 
                 package = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
                 for count in range(package_size):
-                    one_batch = rec_val[count]
-                    output_v = layer(one_batch)
-                    package[count] = output_v
+                    package[count] = layer(rec_val[count])
                 rec_val.share_memory_()
                 queue.put(rec_val)
                 send_opt = dist.isend(tensor=package, dst=5)
@@ -194,6 +182,23 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     if not access_stop_flag:
                         rec_val = torch.zeros(2)
                         dist.recv(tensor=rec_val, src=5)
+                        target_v_pack = torch.zeros([package_size, batch_size], dtype=torch.long)
+                        try:
+                            for count in range(package_size):
+                                _, target_temp = next(data_iter)
+                                target_v_pack[count] = target_temp
+                        except StopIteration as stop_e:
+                            if epoch < max_epoch:
+                                logger.error('rank-%s: epoch-%s start...', str(dist.get_rank()), str(epoch))
+                                epoch += 1
+                                data_iter = iter(loader)
+                                continue
+                            else:
+                                logger.error('iteration end successfully......')
+                                send_opt = dist.isend(tensor=torch.zeros(1), dst=1)
+                                send_opt.wait()
+                                e.wait()
+                                break
                 except RuntimeError as error:
                     access_stop_flag = True
                 finally:
@@ -207,12 +212,9 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         e.wait()
                         break
                     package = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
-                    target_v_pack = torch.zeros([package_size, batch_size], dtype=torch.long)
-                    for count in range(package_size):
-                        _, target_temp = next(data_iter)
-                        target_v_pack[count] = target_temp
 
-                    #target_v_pack = target_buffer.get()
+
+
                     for count in range(package_size):
                         input_v = rec_pack[count]
                         input_v.requires_grad_()
@@ -454,6 +456,8 @@ def init_processes(fn, args, queue, layer, rank, e):
         ])
 
         trainset = torchvision.datasets.CIFAR10(root='../data', train=True, download=False, transform=transform_train)
+
+        #pin memory
         trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=False,
                                                   num_workers=args.data_worker, drop_last=True)
 
@@ -522,6 +526,8 @@ if __name__ == "__main__":
 
     time.sleep(2)
 
+    #torch.manual_seed(1)
+
     bm.register('get_event')
     #bm.register('get_queue')
     m = bm(address=(args.ip, 5000), authkey=b'xpipe')
@@ -547,6 +553,7 @@ if __name__ == "__main__":
                               args.in_plane)
     elif args.layer_type == 2:
         layer = ResOutputLayer(BasicBlock if args.basic == 'True' else Bottleneck)
+
     layer.share_memory()
 
     f_p = Process(target=init_processes, args=(run, args, queue, layer, args.rank, e))
