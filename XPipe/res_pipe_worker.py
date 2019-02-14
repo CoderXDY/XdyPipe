@@ -51,10 +51,13 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
     point = 0
     time_sleep = 6
 
-
+    save_point = 0
 
     if loader is not None and (dist.get_rank() == 0 or dist.get_rank() == 6):
         data_iter = iter(loader)
+
+    optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
+    criterion = nn.CrossEntropyLoss()
 
 
     try:
@@ -103,6 +106,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                 queue.put(rec_val)
                 send_opt = dist.isend(tensor=package, dst=2)
                 send_opt.wait()
+                del package
+                gc.collect()
                 logger.error('rank 1 send....')
 
             elif dist.get_rank() == 2:
@@ -122,6 +127,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                 queue.put(rec_val)
                 send_opt = dist.isend(tensor=package, dst=3)
                 send_opt.wait()
+                del package
+                gc.collect()
                 logging.error('rank 2 send.....')
             elif dist.get_rank() == 3:
                 try:
@@ -140,6 +147,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                 queue.put(rec_val)
                 send_opt = dist.isend(tensor=package, dst=4)
                 send_opt.wait()
+                del package
+                gc.collect()
                 logging.error('rank 3 send.......')
                 #print("rank 3 send.....")
             elif dist.get_rank() == 4:
@@ -159,6 +168,8 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                 queue.put(rec_val)
                 send_opt = dist.isend(tensor=package, dst=5)
                 send_opt.wait()
+                del package
+                gc.collect()
                 logger.error('rank 4 send.....')
                 #print("rank 4 send.......")
             elif dist.get_rank() == 5:
@@ -182,28 +193,25 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     if not access_stop_flag:
                         rec_val = torch.zeros(2)
                         dist.recv(tensor=rec_val, src=5)
-                        target_v_pack = torch.zeros([package_size, batch_size], dtype=torch.long)
-                        try:
-                            for count in range(package_size):
-                                _, target_temp = next(data_iter)
-                                target_v_pack[count] = target_temp
-                        except StopIteration as stop_e:
-                            if epoch < max_epoch:
-                                logger.error('rank-%s: epoch-%s start...', str(dist.get_rank()), str(epoch))
-                                epoch += 1
-                                data_iter = iter(loader)
-                                continue
-                            else:
-                                logger.error('iteration end successfully......')
-                                send_opt = dist.isend(tensor=torch.zeros(1), dst=1)
-                                send_opt.wait()
-                                e.wait()
-                                break
+
                 except RuntimeError as error:
                     access_stop_flag = True
                 finally:
                     try:
                         rec_pack = queue.get(block=True, timeout=queue_wait)
+                        target_flag = True
+                        while target_flag:
+                            target_v_pack = torch.zeros([package_size, batch_size], dtype=torch.long)
+                            try:
+                                for count in range(package_size):
+                                    _, target_temp = next(data_iter)
+                                    target_v_pack[count] = target_temp
+                                target_flag = False
+                            except StopIteration as stop_e:
+                                data_iter = iter(loader)
+                                logger.error("rank 6 data_iter...")
+                                continue
+
                     except Empty as empty:
                         logger.error('rank 6 prepare to end....')
                         #print("rank 6 prepare to end....")
@@ -213,18 +221,11 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         break
                     package = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
 
-
-
                     for count in range(package_size):
-                        input_v = rec_pack[count]
+                        input_v = rec_pack[count].clone()
                         input_v.requires_grad_()
                         output_v = layer(input_v)
-
-                        optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
-
                         optimizer.zero_grad()
-
-                        criterion = nn.CrossEntropyLoss()
                         target_v = target_v_pack[count]
                         batch_idx += 1
                         loss = criterion(output_v, target_v)
@@ -241,6 +242,9 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         package[count] = input_v.grad
                     send_opt = dist.isend(tensor=package, dst=7)
                     send_opt.wait()
+                    del input_v
+                    del package
+                    gc.collect()
                     #dist.isend(tensor=package, dst=7)
                     logger.error('rank 6 send.....')
                     #print("rank 6 send....")
@@ -263,18 +267,19 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         break
                     package = torch.zeros([package_size, batch_size, 256, 8, 8], requires_grad=True)
                     for count in range(package_size):
-                        input_v = input_v_pack[count]
+                        input_v = input_v_pack[count].clone()
                         input_v.requires_grad_()
                         back_grad = back_grad_pack[count]# requires_grad == True????????
                         output_v = layer(input_v)
-
-                        optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
                         optimizer.zero_grad()
                         output_v.backward(back_grad)
                         optimizer.step()
                         package[count] = input_v.grad
                     send_opt = dist.isend(tensor=package, dst=8)
                     send_opt.wait()
+                    del input_v
+                    del package
+                    gc.collect()
                     #dist.isend(tensor=package, dst=8)
                     logger.error('rank 7 send....')
                     #print("rank 7 send.....")
@@ -297,12 +302,10 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         break
                     package = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
                     for count in range(package_size):
-                        input_v = input_v_pack[count]
+                        input_v = input_v_pack[count].clone()
                         input_v.requires_grad_()
                         back_grad = back_grad_pack[count]
                         output_v = layer(input_v)
-
-                        optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
                         optimizer.zero_grad()
                         output_v.backward(back_grad)
                         optimizer.step()
@@ -310,6 +313,9 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     #dist.isend(tensor=package, dst=9)
                     send_opt = dist.isend(tensor=package, dst=9)
                     send_opt.wait()
+                    del input_v
+                    del package
+                    gc.collect()
                     logger.error('rank 8 send.....')
                     #print("rank 8 send......")
 
@@ -332,17 +338,19 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         break
                     package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                     for count in range(package_size):
-                        input_v = input_v_pack[count]
+                        input_v = input_v_pack[count].clone()
                         input_v.requires_grad_()
                         back_grad = back_grad_pack[count]
                         output_v = layer(input_v)
-                        optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
                         optimizer.zero_grad()
                         output_v.backward(back_grad)
                         optimizer.step()
                         package[count] = input_v.grad
                     send_opt = dist.isend(tensor=package, dst=10)
                     send_opt.wait()
+                    del input_v
+                    del package
+                    gc.collect()
                     #dist.isend(tensor=package, dst=10)
                     logger.error('rank 9 send....')
                     #print("rank 9 send......")
@@ -365,17 +373,19 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         break
                     package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                     for count in range(package_size):
-                        input_v = input_v_pack[count]
+                        input_v = input_v_pack[count].clone()
                         input_v.requires_grad_()
                         back_grad = back_grad_pack[count]
                         output_v = layer(input_v)
-                        optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
                         optimizer.zero_grad()
                         output_v.backward(back_grad)
                         optimizer.step()
                         package[count] = input_v.grad
                     send_opt = dist.isend(tensor=package, dst=11)
                     send_opt.wait()
+                    del input_v
+                    del package
+                    gc.collect()
                     #dist.isend(tensor=package, dst=11)
                     logger.error('rank 10 send......')
                     #print("rank 10 send.....")
@@ -395,12 +405,10 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                         e.set()
                         break
                     for count in range(package_size):
-                        input_v = input_v_pack[count]
+                        input_v = input_v_pack[count].clone()
                         input_v.requires_grad_()
                         back_grad = back_grad_pack[count]
                         output_v = layer(input_v)
-
-                        optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
                         optimizer.zero_grad()
                         output_v.backward(back_grad)
                         optimizer.step()
@@ -420,6 +428,20 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                 logger.error(str(p.cpu_times()))
                 logger.error(str(p.memory_info()))
             point += 1
+            if save_point % 30000 == 0:
+                r = dist.get_rank()
+                if r in [0, 1, 2, 3, 4, 5]:
+                    logger.error("save_point: " + str(save_point) + " save....")
+                    state = {
+                        'net': layer.state_dict(),
+                        'epoch': epoch
+                    }
+                    if not os.path.isdir('checkpoint'):
+                        os.mkdir('checkpoint')
+                    torch.save(state, './checkpoint/rank-' + str(r) + '_ckpt.t7')
+            save_point += 1
+
+
         logger.info('rank-%s stop....', str(dist.get_rank()))
         #print("rank-" + str(dist.get_rank()) + " stop.......")
     except Exception as e:
@@ -430,6 +452,12 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
 
 
 def run(queue, layer, e, args, train_loader=None, test_loader=None, target_buffer=None):
+    r = dist.get_rank()
+    if r in [0, 1, 2, 3, 4, 5]:
+        if False:
+            checkpoint = torch.load('./checkpoint/rank-' + str(r) + '_ckpt.t7')
+            layer.load_state_dict(checkpoint['net'])
+
     layer.train()
     train(queue, layer, e, args, train_loader, target_buffer)
     # for epoch in range(4):
