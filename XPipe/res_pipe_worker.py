@@ -575,12 +575,11 @@ def run(queue, layer, global_event, epoch_event, acc, args, train_loader=None, t
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-    """
     start_epoch = 0
     epoch_num = args.epoch
     r = dist.get_rank()
     if r in [0, 1, 2, 3, 4, 5]:
-        if True and os.path.isdir('checkpoint'):
+        if False and os.path.isdir('checkpoint'):
             checkpoint = torch.load('./checkpoint/rank-' + str(r) + '_ckpt.t7')
             layer.load_state_dict(checkpoint['net'])
             start_epoch = checkpoint['epoch']
@@ -605,35 +604,19 @@ def run(queue, layer, global_event, epoch_event, acc, args, train_loader=None, t
                 'acc': acc.get_global_acc(),
                 'epoch': epoch,
             }
-            if not os.path.isdir('checkpoint'):
-                os.mkdir('checkpoint')
+
             if r in [0, 1, 2, 3, 4, 5]:
                 torch.save(state, './checkpoint/rank-' + str(r) + '_ckpt.t7')
             if r == 5:
                 acc.set_best_acc(acc.get_global_acc())
         time.sleep(1)
         epoch_event.clear()
-    """
-
-    epoch = 0
-    r = dist.get_rank()
-    acc.set_global_acc(2.0)
-    if acc.get_global_acc() > acc.get_best_acc():
-        logger.error("epoch-" + str(epoch) + ": save.........")
-        state = {
-            'net': layer.state_dict(),
-            'acc': acc.get_global_acc(),
-            'epoch': epoch,
-        }
-        if not os.path.isdir('checkpoint'):
-            os.mkdir('checkpoint')
-        if r in [0, 1, 2, 3, 4, 5]:
-            torch.save(state, './checkpoint/rank-' + str(r) + '_ckpt.t7')
-
-        acc.set_best_acc(acc.get_global_acc())
     logger.error("rank-" + str(r) + ": run method end......")
-    global_event.set()
-
+    if r == 5:
+        time.sleep(2)
+        global_event.set()
+    else:
+        global_event.wait()
 
 
 def init_processes(fn, args, queue, layer, rank, global_event, epoch_event, acc):
