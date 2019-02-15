@@ -24,21 +24,15 @@ import gc
 
 """
 
-def train(queue, layer, e, args, loader=None, target_buffer=None):
+def train(queue, layer, e, args, logger, loader=None):
 
-    logger = logging.getLogger('rank-' +str(dist.get_rank()))
-    file_handler = logging.FileHandler('/WORK/sysu_wgwu_4/xpipe/XPipe/rank-' + str(dist.get_rank()) + '.log')
-    file_handler.setLevel(level=logging.DEBUG)
-    formatter = logging.Formatter(fmt='%(levelname)s:%(asctime)s | pricess_id-%(process)d | %(funcName)s->%(lineno)d | %(message)s', datefmt='%Y/%m/%d %H:%M:%S')
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
 
     batch_size = args.batch_size
     package_size = args.package_size
     send_num = args.send_num
     epoch = 0
-    max_epoch = args.epoch
-
+    #max_epoch = args.epoch
+    max_epoch = 0
     all_loss = 0
     batch_idx = 0
     total = 0
@@ -129,7 +123,7 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                 send_opt.wait()
                 del package
                 gc.collect()
-                logging.error('rank 2 send.....')
+                #logging.error('rank 2 send.....')
             elif dist.get_rank() == 3:
                 try:
                     rec_val = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
@@ -352,7 +346,7 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                     del package
                     gc.collect()
                     #dist.isend(tensor=package, dst=10)
-                    logger.error('rank 9 send....')
+                    #logger.error('rank 9 send....')
                     #print("rank 9 send......")
             elif dist.get_rank() == 10:
                 try:
@@ -428,22 +422,11 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
                 logger.error(str(p.cpu_times()))
                 logger.error(str(p.memory_info()))
             point += 1
-            if save_point % 30000 == 0:
-                r = dist.get_rank()
-                if r in [0, 1, 2, 3, 4, 5]:
-                    logger.error("save_point: " + str(save_point) + " save....")
-                    state = {
-                        'net': layer.state_dict(),
-                        'epoch': epoch
-                    }
-                    if not os.path.isdir('checkpoint'):
-                        os.mkdir('checkpoint')
-                    torch.save(state, './checkpoint/rank-' + str(r) + '_ckpt.t7')
-            save_point += 1
+
 
 
         logger.info('rank-%s stop....', str(dist.get_rank()))
-        #print("rank-" + str(dist.get_rank()) + " stop.......")
+
     except Exception as e:
         logger.error('rank-' + str(dist.get_rank()) + ' fail: ', exc_info=True)
         #print(e)
@@ -451,26 +434,209 @@ def train(queue, layer, e, args, loader=None, target_buffer=None):
 
 
 
-def run(queue, layer, e, args, train_loader=None, test_loader=None, target_buffer=None):
+
+
+
+def test(layer, e, acc, args, logger, loader=None):
+
+    batch_size = args.batch_size
+    all_loss = 0
+    total = 0
+    correct = 0
+    criterion = nn.CrossEntropyLoss()
+    logger.error("start eval..............")
+    try:
+        while True:
+
+            if dist.get_rank() == 0:
+                for id, (input_v, target_v) in enumerate(loader):
+                    output_v = layer(input_v)
+                    send_opt = dist.isend(tensor=output_v, dst=1)
+                    send_opt.wait()
+                    logger.error("eval send ........")
+                logger.error('eval iteration end successfully......')
+                send_opt = dist.isend(tensor=torch.zeros(1), dst=1)
+                send_opt.wait()
+                e.wait()
+                break
+            elif dist.get_rank() == 1:
+                try:
+                    rec_val = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
+                    dist.recv(tensor=rec_val, src=0)
+                except RuntimeError as error:
+                    send_opt = dist.isend(tensor=torch.zeros(1), dst=2)
+                    send_opt.wait()
+                    e.wait()
+                    break
+                output_v = layer(rec_val)
+                send_opt = dist.isend(tensor=output_v, dst=2)
+                send_opt.wait()
+                logger.error('eval: rank 1 send....')
+
+            elif dist.get_rank() == 2:
+                try:
+                    rec_val = torch.zeros([batch_size, 64, 32, 32], requires_grad=True)
+                    dist.recv(tensor=rec_val, src=1)
+                except RuntimeError as error:
+                    send_opt = dist.isend(tensor=torch.zeros(1), dst=3)
+                    send_opt.wait()
+                    e.wait()
+                    break
+                output_v = layer(rec_val)
+                send_opt = dist.isend(tensor=output_v, dst=3)
+                send_opt.wait()
+                logging.error('eval: rank 2 send.....')
+            elif dist.get_rank() == 3:
+                try:
+                    rec_val = torch.zeros([batch_size, 128, 16, 16], requires_grad=True)
+                    dist.recv(tensor=rec_val, src=2)
+                except RuntimeError as error:
+                    send_opt = dist.isend(tensor=torch.zeros(1), dst=4)
+                    send_opt.wait()
+                    e.wait()
+                    break
+                output_v = layer(rec_val)
+                send_opt = dist.isend(tensor=output_v, dst=4)
+                send_opt.wait()
+                logging.error('eval: rank 3 send.......')
+            elif dist.get_rank() == 4:
+                try:
+                    rec_val = torch.zeros([batch_size, 256, 8, 8], requires_grad=True)
+                    dist.recv(tensor=rec_val, src=3)
+                except RuntimeError as error:
+                    send_opt = dist.isend(tensor=torch.zeros(1), dst=5)
+                    send_opt.wait()
+                    e.wait()
+                    break
+                output_v = layer(rec_val)
+                send_opt = dist.isend(tensor=output_v, dst=5)
+                send_opt.wait()
+                logger.error('eval: rank 4 send.....')
+            elif dist.get_rank() == 5:
+                try:
+                    rec_val = torch.zeros([batch_size, 512, 4, 4], requires_grad=True)
+                    dist.recv(tensor=rec_val, src=4)
+                    for batch_idx, (_, target_v) in enumerate(loader):
+                        output_v = layer(rec_val)
+                        loss = criterion(output_v, target_v)
+                        all_loss += loss.item()
+                        _, predicted = output_v.max(1)
+                        total += target_v.size(0)
+                        correct += predicted.eq(target_v).sum().item()
+                        logger.error('eval: batch_idx: %d | Loss: %.3f | Acc: %.3f%% (%d/%d)' % (
+                            batch_idx, all_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                        rec_val = torch.zeros([batch_size, 512, 4, 4], requires_grad=True)
+                        dist.recv(tensor=rec_val, src=4)
+                except RuntimeError as error:
+                    logger.error("rank 5 triger to stop.....")
+                    if total != 0:
+                        value = 100. * correct / total
+                        acc.set_global_acc(value)
+                    e.set()
+                    break
+            elif dist.get_rank() == 6:
+                e.wait()
+                break
+            elif dist.get_rank() == 7:
+                e.wait()
+                break
+            elif dist.get_rank() == 8:
+                e.wait()
+                break
+            elif dist.get_rank() == 9:
+                e.wait()
+                break
+            elif dist.get_rank() == 10:
+                e.wait()
+                break
+            elif dist.get_rank() == 11:
+                e.wait()
+                break
+
+
+        logger.info(' eval rank-%s stop....', str(dist.get_rank()))
+    except Exception as e:
+        logger.error('eval rank-' + str(dist.get_rank()) + ' fail: ', exc_info=True)
+        return
+
+
+
+
+
+
+def run(queue, layer, global_event, epoch_event, acc, args, train_loader=None, test_loader=None):
+
+    logger = logging.getLogger('rank-' + str(dist.get_rank()))
+    file_handler = logging.FileHandler('/WORK/sysu_wgwu_4/xpipe/XPipe/rank-' + str(dist.get_rank()) + '.log')
+    file_handler.setLevel(level=logging.DEBUG)
+    formatter = logging.Formatter(
+        fmt='%(levelname)s:%(asctime)s | pricess_id-%(process)d | %(funcName)s->%(lineno)d | %(message)s',
+        datefmt='%Y/%m/%d %H:%M:%S')
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    """
+    start_epoch = 0
+    epoch_num = args.epoch
     r = dist.get_rank()
     if r in [0, 1, 2, 3, 4, 5]:
-        if False:
+        if True and os.path.isdir('checkpoint'):
             checkpoint = torch.load('./checkpoint/rank-' + str(r) + '_ckpt.t7')
             layer.load_state_dict(checkpoint['net'])
+            start_epoch = checkpoint['epoch']
+            best_acc.value = checkpoint['acc']
+            logger.error("load the model: start_epoch: " + str(start_epoch) + " best_acc: " + str(best_acc.value))
 
-    layer.train()
-    train(queue, layer, e, args, train_loader, target_buffer)
-    # for epoch in range(4):
-    # print(str(dist.get_rank()) + "-train iter-" + str(epoch))
-    # layer.train()
-    # train(queue, layer, e, train_loader, target_buffer)
-    # print("test iter-" + str(epoch))
-    # layer.eval()
-    # with torch.no_grad():
-    # test(queue, layer, e, test_loader, target_buffer)
+    for epoch in range(start_epoch, start_epoch + epoch_num):
+        logger.error("training epoch-" + str(epoch) + '.........................................................................')
+        layer.train()
+        train(queue, layer, epoch_event, args, logger, train_loader)
+        gc.collect()
+        time.sleep(1)
+        epoch_event.clear()
+        logger.error("eval epoch-" + str(epoch) + '.........................................................................')
+        layer.eval()
+        with torch.no_grad():
+            test(layer, epoch_event, acc, args, logger, test_loader)
+        if acc.get_global_acc() > acc.get_best_acc():
+            logger.error("epoch-" + str(epoch) + ": save.........")
+            state = {
+                'net': layer.state_dict(),
+                'acc': acc.get_global_acc(),
+                'epoch': epoch,
+            }
+            if not os.path.isdir('checkpoint'):
+                os.mkdir('checkpoint')
+            if r in [0, 1, 2, 3, 4, 5]:
+                torch.save(state, './checkpoint/rank-' + str(r) + '_ckpt.t7')
+            if r == 5:
+                acc.set_best_acc(acc.get_global_acc())
+        time.sleep(1)
+        epoch_event.clear()
+    """
+
+    epoch = 0
+    r = dist.get_rank()
+    acc.set_global_acc(2.0)
+    if acc.get_global_acc() > acc.get_best_acc():
+        logger.error("epoch-" + str(epoch) + ": save.........")
+        state = {
+            'net': layer.state_dict(),
+            'acc': acc.get_global_acc(),
+            'epoch': epoch,
+        }
+        if not os.path.isdir('checkpoint'):
+            os.mkdir('checkpoint')
+        if r in [0, 1, 2, 3, 4, 5]:
+            torch.save(state, './checkpoint/rank-' + str(r) + '_ckpt.t7')
+
+        acc.set_best_acc(acc.get_global_acc())
+    logger.error("rank-" + str(r) + ": run method end......")
+    global_event.set()
 
 
-def init_processes(fn, args, queue, layer, rank, e):
+
+def init_processes(fn, args, queue, layer, rank, global_event, epoch_event, acc):
     print("init process-" + str(rank) + "....")
     dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=rank)
 
@@ -500,14 +666,25 @@ def init_processes(fn, args, queue, layer, rank, e):
 
         classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
-    target_buffer = None
+
+    if rank == 5:
+        transform_test = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
+
+        testset = torchvision.datasets.CIFAR10(root='../data', train=False, download=False, transform=transform_test)
+        testloader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size, shuffle=False,
+                                                 num_workers=args.data_worker, drop_last=True)
+
     if rank == 0:
-        fn(queue, layer, e, args, train_loader=trainloader, test_loader=testloader,
-           target_buffer=target_buffer)
+        fn(queue, layer, global_event, epoch_event, acc, args, train_loader=trainloader, test_loader=testloader)
+    elif rank == 5:
+        fn(queue, layer, global_event, epoch_event, acc, args, test_loader=testloader)
     elif rank == 6:
-        fn(queue, layer, e, args, train_loader=trainloader, target_buffer=target_buffer)
+        fn(queue, layer, global_event, epoch_event,acc, args, train_loader=trainloader, test_loader=testloader)
     else:
-        fn(queue, layer, e, args)
+        fn(queue, layer, global_event, epoch_event, acc, args)
 
 
 if __name__ == "__main__":
@@ -556,19 +733,16 @@ if __name__ == "__main__":
 
     #torch.manual_seed(1)
 
-    bm.register('get_event')
-    #bm.register('get_queue')
+    bm.register('get_epoch_event')
+    bm.register('get_global_event')
+    bm.register('get_acc')
+
     m = bm(address=(args.ip, 5000), authkey=b'xpipe')
     m.connect()
-    e = m.get_event()
+    global_event = m.get_global_event()
+    epoch_event = m.get_epoch_event()
+    acc = m.get_acc()
 
-    # target_queue = None
-    #
-    # if args.rank == 0 or args.rank == 6:
-    #     target_queue = m.get_queue()
-    #     target_queue.put(0)
-    #     a = target_queue.get()
-    #     print("a:" + a)
     queue = Queue(args.buffer_size)
 
     if args.layer_type == 0:
@@ -584,9 +758,9 @@ if __name__ == "__main__":
 
     layer.share_memory()
 
-    f_p = Process(target=init_processes, args=(run, args, queue, layer, args.rank, e))
+    f_p = Process(target=init_processes, args=(run, args, queue, layer, args.rank, global_event, epoch_event, acc))
     f_p.start()
-    b_p = Process(target=init_processes, args=(run, args, queue, layer, (11 - args.rank), e))
+    b_p = Process(target=init_processes, args=(run, args, queue, layer, (11 - args.rank), global_event, epoch_event, acc))
     b_p.start()
     f_p.join()
     b_p.join()

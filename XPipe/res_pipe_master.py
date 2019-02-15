@@ -17,14 +17,34 @@ import traceback
 from queue import Empty
 import os
 
-e = Event()
-target_buffer = Queue(20)
+epoch_event = Event()
+global_event = Event()
 
-def get_event():
-    return e
 
-def get_queue():
-    return target_buffer
+class Acc(object):
+    def __init__(self):
+        self.global_acc = 0.0
+        self.best_acc = 0.0
+
+    def set_global_acc(self, value):
+        self.global_acc = value
+
+    def set_best_acc(self, value):
+        self.best_acc = value
+
+    def get_global_acc(self):
+        return self.global_acc
+
+    def get_best_acc(self):
+        return self.best_acc
+
+
+def get_epoch_event():
+    return epoch_event
+
+def get_global_event():
+    return global_event
+
 
 if __name__ == "__main__":
 
@@ -35,12 +55,13 @@ if __name__ == "__main__":
     if os.path.exists(args.path):
         os.remove(args.path)
 
-    bm.register('get_event', callable=get_event)
-    bm.register('get_queue', callable=get_queue)
+    bm.register('get_epoch_event', callable=get_epoch_event)
+    bm.register('get_global_event', callable=get_global_event)
+    bm.register('get_acc', Acc)
     m = bm(address=(args.ip, 5000), authkey=b'xpipe')
     m.start()
-    m_e = m.get_event()
+    g_e = m.get_global_event()
     print("master run......")
-    m_e.wait()
+    g_e.wait()
     m.shutdown()
     print("master shutdown........")
