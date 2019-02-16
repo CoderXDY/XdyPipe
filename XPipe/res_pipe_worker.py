@@ -61,11 +61,12 @@ def train(queue, layer, e, args, logger, loader=None):
                 package = torch.zeros([package_size, batch_size, 64, 32, 32], requires_grad=True)
                 try:
                     input_v_pack = torch.zeros([package_size, batch_size, 3, 32, 32], requires_grad=True)
-                    for count in range(package_size):
-                        input_v, target_v = next(data_iter)
-                        input_v_pack[count] = input_v
-                        output_v = layer(input_v)
-                        package[count] = output_v
+                    with torch.no_grad():
+                        for count in range(package_size):
+                            input_v, target_v = next(data_iter)
+                            input_v_pack[count] = input_v
+                            output_v = layer(input_v)
+                            package[count] = output_v
                     input_v_pack.share_memory_()
                     queue.put(input_v_pack)
                 except StopIteration as stop_e:
@@ -94,8 +95,9 @@ def train(queue, layer, e, args, logger, loader=None):
                     e.wait()
                     break
                 package = torch.zeros([package_size, batch_size, 64, 32, 32])
-                for count in range(package_size):
-                    package[count] = layer(rec_val[count])
+                with torch.no_grad():
+                    for count in range(package_size):
+                        package[count] = layer(rec_val[count])
                 rec_val.share_memory_()
                 queue.put(rec_val)
                 send_opt = dist.isend(tensor=package, dst=2)
@@ -115,15 +117,16 @@ def train(queue, layer, e, args, logger, loader=None):
                     break
 
                 package = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
-                for count in range(package_size):
-                    package[count] = layer(rec_val[count])
+                with torch.no_grad():
+                    for count in range(package_size):
+                        package[count] = layer(rec_val[count])
                 rec_val.share_memory_()
                 queue.put(rec_val)
                 send_opt = dist.isend(tensor=package, dst=3)
                 send_opt.wait()
                 del package
                 gc.collect()
-                #logging.error('rank 2 send.....')
+                logging.error('rank 2 send.....')
             elif dist.get_rank() == 3:
                 try:
                     rec_val = torch.zeros([package_size, batch_size, 128, 16, 16], requires_grad=True)
@@ -135,8 +138,9 @@ def train(queue, layer, e, args, logger, loader=None):
                     break
 
                 package = torch.zeros([package_size, batch_size, 256, 8, 8], requires_grad=True)
-                for count in range(package_size):
-                    package[count] = layer(rec_val[count])
+                with torch.no_grad():
+                    for count in range(package_size):
+                        package[count] = layer(rec_val[count])
                 rec_val.share_memory_()
                 queue.put(rec_val)
                 send_opt = dist.isend(tensor=package, dst=4)
@@ -156,8 +160,9 @@ def train(queue, layer, e, args, logger, loader=None):
                     break
 
                 package = torch.zeros([package_size, batch_size, 512, 4, 4], requires_grad=True)
-                for count in range(package_size):
-                    package[count] = layer(rec_val[count])
+                with torch.no_grad():
+                    for count in range(package_size):
+                        package[count] = layer(rec_val[count])
                 rec_val.share_memory_()
                 queue.put(rec_val)
                 send_opt = dist.isend(tensor=package, dst=5)
@@ -429,7 +434,7 @@ def train(queue, layer, e, args, logger, loader=None):
 
     except Exception as e:
         logger.error('rank-' + str(dist.get_rank()) + ' fail: ', exc_info=True)
-        #print(e)
+        os._exit(0)
         return
 
 
@@ -529,6 +534,8 @@ def test(layer, e, acc, args, logger, loader=None):
                         dist.recv(tensor=rec_val, src=4)
                 except RuntimeError as error:
                     logger.error("rank 5 triger to stop.....")
+                    if not os.path.isdir('checkpoint'):
+                        os.mkdir('checkpoint')
                     if total != 0:
                         value = 100. * correct / total
                         acc.set_global_acc(value)
@@ -557,6 +564,7 @@ def test(layer, e, acc, args, logger, loader=None):
         logger.info(' eval rank-%s stop....', str(dist.get_rank()))
     except Exception as e:
         logger.error('eval rank-' + str(dist.get_rank()) + ' fail: ', exc_info=True)
+        os._exit(0)
         return
 
 
@@ -578,13 +586,14 @@ def run(queue, layer, global_event, epoch_event, acc, args, train_loader=None, t
     start_epoch = 0
     epoch_num = args.epoch
     r = dist.get_rank()
+    best_acc = 0.0
     if r in [0, 1, 2, 3, 4, 5]:
-        if False and os.path.isdir('checkpoint'):
+        if True and os.path.isdir('checkpoint'):
             checkpoint = torch.load('./checkpoint/rank-' + str(r) + '_ckpt.t7')
             layer.load_state_dict(checkpoint['net'])
             start_epoch = checkpoint['epoch']
-            best_acc.value = checkpoint['acc']
-            logger.error("load the model: start_epoch: " + str(start_epoch) + " best_acc: " + str(best_acc.value))
+            best_acc = checkpoint['acc']
+            logger.error("load the model: start_epoch: " + str(start_epoch) + " best_acc: " + str(best_acc))
 
     for epoch in range(start_epoch, start_epoch + epoch_num):
         logger.error("training epoch-" + str(epoch) + '.........................................................................')
@@ -597,18 +606,17 @@ def run(queue, layer, global_event, epoch_event, acc, args, train_loader=None, t
         layer.eval()
         with torch.no_grad():
             test(layer, epoch_event, acc, args, logger, test_loader)
-        if acc.get_global_acc() > acc.get_best_acc():
+        if r in [0, 1, 2, 3, 4, 5] and acc.get_global_acc() > best_acc:
             logger.error("epoch-" + str(epoch) + ": save.........")
             state = {
                 'net': layer.state_dict(),
                 'acc': acc.get_global_acc(),
                 'epoch': epoch,
             }
-
-            if r in [0, 1, 2, 3, 4, 5]:
-                torch.save(state, './checkpoint/rank-' + str(r) + '_ckpt.t7')
-            if r == 5:
-                acc.set_best_acc(acc.get_global_acc())
+            torch.save(state, './checkpoint/rank-' + str(r) + '_ckpt.t7')
+            best_acc = acc.get_global_acc()
+        else:
+            time.sleep(1)
         time.sleep(1)
         epoch_event.clear()
     logger.error("rank-" + str(r) + ": run method end......")

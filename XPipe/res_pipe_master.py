@@ -54,8 +54,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if os.path.exists(args.path):
         os.remove(args.path)
-    if not os.path.isdir('checkpoint'):
-        os.mkdir('checkpoint')
+
     bm.register('get_epoch_event', callable=get_epoch_event)
     bm.register('get_global_event', callable=get_global_event)
     bm.register('get_acc', Acc)
