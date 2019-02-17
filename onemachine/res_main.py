@@ -17,6 +17,7 @@ from queue import Empty, Full
 import os
 import psutil
 import gc
+from models.resnet import ResNet18
 
 
 
@@ -46,11 +47,14 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False,
 
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
-torch.manual_seed(1)
+#torch.manual_seed(1)
+net = ResNet18()
 net = net.to(device)
 #net.share_memory()
 #torch.multiprocessing.set_start_method("spawn")
 #cudnn.benchmark = True
+if device == 'cuda':
+    cudnn.benchmark = True
 
 if False:
     # Load checkpoint.
@@ -67,6 +71,7 @@ if False:
 output_queue = Queue(10)
 
 def train(epoch):
+
     print('Epoch: %d' % epoch)
 
     def backward():
@@ -78,11 +83,9 @@ def train(epoch):
         correct = 0
         total = 0
 
-        global output_queue
-
         while not outputs.empty():
             optimizer.zero_grad()
-            outputs = output_queue.get(block=False)
+            outputs, targets = output_queue.get(block=False)
             loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
@@ -98,14 +101,12 @@ def train(epoch):
 
     net.train()
 
-    global output_queue
-
     start_flag = True
 
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         inputs, targets = inputs.to(device), targets.to(device)
         outputs = net(inputs)
-        output_queue.put(outputs)
+        output_queue.put([outputs, targets])
         if start_flag and output_queue.qsize() > 2:
             start_flag = False
             back_process = Process(target=backward)
