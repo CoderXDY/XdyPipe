@@ -18,7 +18,7 @@ import os
 import psutil
 import gc
 from resnet import ResNet18
-
+import torch.backends.cudnn as cudnn
 
 
 parser = argparse.ArgumentParser()
@@ -64,11 +64,12 @@ if False:
     net.load_state_dict(checkpoint['net'])
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
 
 
-output_queue = Queue(10)
+output_queue = Queue(3)
 
 def train(epoch):
 
@@ -83,7 +84,7 @@ def train(epoch):
         correct = 0
         total = 0
 
-        while not outputs.empty():
+        while not output_queue.empty():
             optimizer.zero_grad()
             outputs, targets = output_queue.get(block=False)
             loss = criterion(outputs, targets)
