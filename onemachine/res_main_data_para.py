@@ -26,6 +26,8 @@ parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument('-file', help='the filename of log')
 parser.add_argument('-buffer_size', type=int, help='the size of buffer queue caching the batch data', default=3)
 parser.add_argument('-batch_size', type=int, help='batch_size', default=128)
+parser.add_argument('-wait', type=int, help='wait to start thread', default=2)
+parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
 args = parser.parse_args()
 
 
@@ -74,7 +76,7 @@ if device == 'cuda':
     net = torch.nn.DataParallel(net)
     cudnn.benchmark = True
 
-if True:
+if args.resume:
     # Load checkpoint.
     print('==> Resuming from checkpoint..')
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
@@ -130,7 +132,7 @@ def train(epoch):
         inputs, targets = inputs.to(device), targets.to(device)
         outputs = net(inputs)
         output_queue.put([outputs, targets])
-        if start_flag and output_queue.qsize() > 2:
+        if start_flag and output_queue.qsize() > args.wait: #2
             start_flag = False
             back_process = Process(target=backward)
             back_process.start()
