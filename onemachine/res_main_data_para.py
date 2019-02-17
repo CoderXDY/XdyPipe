@@ -23,7 +23,24 @@ import torch.backends.cudnn as cudnn
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
+parser.add_argument('-file', help='the filename of log')
+parser.add_argument('-buffer_size', type=int, help='the size of buffer queue caching the batch data', default=3)
+parser.add_argument('-batch_size', type=int, help='batch_size', default=128)
 args = parser.parse_args()
+
+
+logger = logging.getLogger(args.file)
+file_handler = logging.FileHandler(args.file + '.log')
+file_handler.setLevel(level=logging.DEBUG)
+formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
+
+
+
+
+
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
@@ -40,7 +57,7 @@ transform_test = transforms.Compose([
 ])
 
 trainset = torchvision.datasets.CIFAR10(root='../data', train=True, download=False, transform=transform_train)
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=2)
+trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=2)
 
 testset = torchvision.datasets.CIFAR10(root='../data', train=False, download=False, transform=transform_test)
 testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
@@ -72,7 +89,7 @@ criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
 
 
-output_queue = Queue(3)
+output_queue = Queue(args.buffer_size)
 
 def train(epoch):
 
@@ -100,6 +117,8 @@ def train(epoch):
             correct += predicted.eq(targets).sum().item()
 
             progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                         % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+            logger.error('Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
             batch_idx += 1
 
@@ -145,6 +164,8 @@ def test(epoch):
             correct += predicted.eq(targets).sum().item()
 
             progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
+            logger.error('Loss: %.3f | Acc: %.3f%% (%d/%d)'
                 % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
     # Save checkpoint.
