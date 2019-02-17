@@ -64,6 +64,8 @@ if False:
     net.load_state_dict(checkpoint['net'])
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
+    print("best_acc: " + str(best_acc))
+    print("best_epoch: " + str(start_epoch))
 
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
