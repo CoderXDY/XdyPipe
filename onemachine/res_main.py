@@ -17,7 +17,7 @@ from queue import Empty, Full
 import os
 import psutil
 import gc
-from models.resnet import ResNet18
+from resnet import ResNet18
 
 
 
