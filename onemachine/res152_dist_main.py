@@ -18,6 +18,7 @@ import os
 import psutil
 import gc
 from resnet import ResNet18
+from resnet152_dist import ResNet152
 import torch.backends.cudnn as cudnn
 
 
@@ -43,7 +44,7 @@ logger.addHandler(file_handler)
 
 
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+#device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 transform_train = transforms.Compose([
@@ -67,14 +68,14 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False,
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 #torch.manual_seed(1)
-net = ResNet18()
-net = net.to(device)
+net = ResNet152()
+#net = net.to(device)
 #net.share_memory()
 #torch.multiprocessing.set_start_method("spawn")
 #cudnn.benchmark = True
-if device == 'cuda':
-    net = torch.nn.DataParallel(net)
-    cudnn.benchmark = True
+#if device == 'cuda':
+ #   net = torch.nn.DataParallel(net)
+cudnn.benchmark = True
 
 if args.resume:
     # Load checkpoint.
@@ -88,6 +89,7 @@ if args.resume:
     print("start_epoch: " + str(start_epoch))
 
 criterion = nn.CrossEntropyLoss()
+criterion.cuda(1)
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
 
 
@@ -129,7 +131,7 @@ def train(epoch):
     start_flag = True
 
     for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
+        inputs, targets = inputs.cuda(0), targets.to(1)
         outputs = net(inputs)
         output_queue.put([outputs, targets])
         if start_flag and output_queue.qsize() > args.wait: #2
