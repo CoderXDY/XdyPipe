@@ -54,6 +54,7 @@ net = net.to(device)
 #torch.multiprocessing.set_start_method("spawn")
 #cudnn.benchmark = True
 if device == 'cuda':
+    net = torch.nn.DataParllel(net)
     cudnn.benchmark = True
 
 if False:
