@@ -54,10 +54,10 @@ net = net.to(device)
 #torch.multiprocessing.set_start_method("spawn")
 #cudnn.benchmark = True
 if device == 'cuda':
-    net = torch.nn.DataParllel(net)
+    net = torch.nn.DataParallel(net)
     cudnn.benchmark = True
 
-if False:
+if True:
     # Load checkpoint.
     print('==> Resuming from checkpoint..')
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
@@ -65,6 +65,8 @@ if False:
     net.load_state_dict(checkpoint['net'])
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
+    print("best_acc: " + str(best_acc))
+    print("start_epoch: " + str(start_epoch))
 
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
