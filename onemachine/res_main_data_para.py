@@ -17,7 +17,7 @@ from queue import Empty, Full
 import os
 import psutil
 import gc
-from resnet import ResNet18
+from resnet import ResNet18, ResNet152
 import torch.backends.cudnn as cudnn
 
 
@@ -67,7 +67,8 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False,
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 #torch.manual_seed(1)
-net = ResNet18()
+#net = ResNet18()
+net = ResNet152()
 net = net.to(device)
 #net.share_memory()
 #torch.multiprocessing.set_start_method("spawn")
