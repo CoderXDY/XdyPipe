@@ -108,7 +108,7 @@ def train(epoch):
         correct = 0
         total = 0
 
-        while not True:
+        while True:
             optimizer.zero_grad()
             try:
                 outputs, targets = output_queue.get(block=True, timeout=args.wait)
