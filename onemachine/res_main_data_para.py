@@ -17,7 +17,7 @@ from queue import Empty, Full
 import os
 import psutil
 import gc
-from resnet import ResNet18, ResNet50,  ResNet152
+from resnet import ResNet18, ResNet34, ResNet50,  ResNet152
 import torch.backends.cudnn as cudnn
 
 
@@ -68,7 +68,7 @@ classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship'
 
 #torch.manual_seed(1)
 #net = ResNet18()
-net = ResNet50()
+net = ResNet34()
 net = net.to(device)
 #net.share_memory()
 #torch.multiprocessing.set_start_method("spawn")
