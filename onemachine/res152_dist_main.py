@@ -113,7 +113,7 @@ def train(epoch):
             try:
                 outputs, targets = output_queue.get(block=True, timeout=args.wait)
             except Empty as e:
-                print("empty.....")
+                print("done.....")
                 break
             loss = criterion(outputs, targets)
             loss.backward()
@@ -129,9 +129,6 @@ def train(epoch):
             logger.error('Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
             batch_idx += 1
-
-
-
 
     net.train()
 
