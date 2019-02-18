@@ -1,0 +1,1 @@
+python res_main_data_para.py --lr=0.01 -file 'fbapdatap_0.01_2_256' -buffer_size 2 -batch_size 256 -wait 1
