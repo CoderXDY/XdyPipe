@@ -28,7 +28,7 @@ parser.add_argument('-buffer_size', type=int, help='the size of buffer queue cac
 parser.add_argument('-batch_size', type=int, help='batch_size', default=128)
 parser.add_argument('-wait', type=int, help='wait to start thread', default=2)
 parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
-parser.add_argument('--par', '-r', action='store_true', help='data paralell')
+parser.add_argument('--par', '-p', action='store_true', help='data paralell')
 args = parser.parse_args()
 
 
