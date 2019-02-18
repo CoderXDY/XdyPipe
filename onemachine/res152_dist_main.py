@@ -113,7 +113,7 @@ def train(epoch):
             try:
                 outputs, targets = output_queue.get(block=True, timeout=args.wait)
             except Empty as e:
-                print("empty.....")
+                print("done.....")
                 break
             loss = criterion(outputs, targets)
             loss.backward()
@@ -129,6 +129,7 @@ def train(epoch):
             logger.error('Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
             batch_idx += 1
+
     net.train()
 
     start_flag = True
@@ -146,7 +147,27 @@ def train(epoch):
     back_process.join()
 
 
+def train2(epoch):
+    print('\nEpoch: %d' % epoch)
+    net.train()
+    train_loss = 0
+    correct = 0
+    total = 0
+    for batch_idx, (inputs, targets) in enumerate(trainloader):
+        inputs, targets = inputs.to(0), targets.to(1)
+        optimizer.zero_grad()
+        outputs = net(inputs)
+        loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
 
+        train_loss += loss.item()
+        _, predicted = outputs.max(1)
+        total += targets.size(0)
+        correct += predicted.eq(targets).sum().item()
+
+        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+            % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
 
 
@@ -161,7 +182,7 @@ def test(epoch):
     total = 0
     with torch.no_grad():
         for batch_idx, (inputs, targets) in enumerate(testloader):
-            inputs, targets = inputs.to(device), targets.to(device)
+            inputs, targets = inputs.to(0), targets.to(1)
             outputs = net(inputs)
             loss = criterion(outputs, targets)
 
@@ -193,5 +214,5 @@ def test(epoch):
 
 
 for epoch in range(start_epoch, start_epoch + 200):
-    train(epoch)
+    train2(epoch)
     test(epoch)
