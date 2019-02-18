@@ -108,7 +108,7 @@ def train(epoch):
         correct = 0
         total = 0
 
-        while not True:
+        while True:
             optimizer.zero_grad()
             try:
                 outputs, targets = output_queue.get(block=True, timeout=args.wait)
@@ -129,6 +129,10 @@ def train(epoch):
             logger.error('Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
             batch_idx += 1
+
+
+
+
     net.train()
 
     start_flag = True
@@ -161,7 +165,7 @@ def test(epoch):
     total = 0
     with torch.no_grad():
         for batch_idx, (inputs, targets) in enumerate(testloader):
-            inputs, targets = inputs.to(device), targets.to(device)
+            inputs, targets = inputs.to(0), targets.to(1)
             outputs = net(inputs)
             loss = criterion(outputs, targets)
 
