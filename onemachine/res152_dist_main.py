@@ -125,7 +125,7 @@ def train(epoch):
             logger.error('Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
             batch_idx += 1
-
+        print("thead end......")
     net.train()
 
     start_flag = True
@@ -133,6 +133,7 @@ def train(epoch):
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         inputs, targets = inputs.cuda(0), targets.to(1)
         outputs = net(inputs)
+        print("proc......")
         output_queue.put([outputs, targets])
         if start_flag and output_queue.qsize() > args.wait: #2
             start_flag = False
