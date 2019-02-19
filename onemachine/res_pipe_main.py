@@ -19,7 +19,7 @@ import psutil
 import gc
 from resnet import ResNet18
 from resnet152_dist import ResNet50
-from resnet_pipe_model import ResPipeNet18, ResPipeNet50
+from resnet_pipe_model import ResPipeNet18, ResPipeNet50, THResPipeNet18, THResPipeNet50
 import torch.backends.cudnn as cudnn
 from visdom import Visdom
 

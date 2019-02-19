@@ -69,7 +69,7 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False,
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 #torch.manual_seed(1)
-net = ResNet18()
+net = ResNet50()
 #net = net.to(device)
 #net.share_memory()
 #torch.multiprocessing.set_start_method("spawn")

@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from multiprocessing.dummy import Process, Queue
 
-__all__ = ['ResNet18', 'ResNet34', 'ResNet50', 'ResNet152', 'ResPipeNet18', 'ResPipeNet50']
+__all__ = ['ResNet18', 'ResNet34', 'ResNet50', 'ResNet152', 'ResPipeNet18', 'ResPipeNet50', 'THResPipeNet18', 'THResPipeNet50' ]
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -220,6 +220,12 @@ def ResPipeNet18(size, wait):
 
 def ResPipeNet50(size, wait):
     return ResPipeNet(size, wait, Bottleneck, [3, 4, 6, 3])
+
+def THResPipeNet18(size, wait):
+    return THResPipeNet(size, wait, BasicBlock, [2, 2, 2, 2])
+
+def THResPipeNet50(size, wait):
+    return THResPipeNet(size, wait, Bottleneck, [3, 4, 6, 3])
 
 
 
