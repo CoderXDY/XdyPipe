@@ -108,7 +108,7 @@ class ResNet(nn.Module):
 
 class ResPipeNet(nn.Module):
     def __init__(self, size, wait, block, num_blocks, num_classes=10):
-        super(ResNet, self).__init__()
+        super(ResPipeNet, self).__init__()
         self.in_planes = 64
         self.queue = Queue(size)
         self.wait = wait
