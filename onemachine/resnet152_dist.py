@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ['ResNet50']
+__all__ = ['ResNet18', 'ResNet50']
 
 class BasicBlock(nn.Module):
     expansion = 1

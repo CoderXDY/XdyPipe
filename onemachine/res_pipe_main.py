@@ -77,7 +77,7 @@ cudnn.benchmark = True
 
 
 
-net = ResPipeNet18(args.mq, args.mw)
+net = ResPipeNet50(args.mq, args.mw)
 
 
 
