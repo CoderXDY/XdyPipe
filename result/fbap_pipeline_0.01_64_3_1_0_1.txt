@@ -1,0 +1,1 @@
+python res_pipe_main.py --lr=0.01 -file 'temp' -buffer_size 3 -batch_size 64 -wait 1 -mq 1 -mw 0 -count 1
