@@ -20,7 +20,7 @@ import gc
 from resnet import ResNet18
 from resnet152_dist import ResNet18, ResNet50
 import torch.backends.cudnn as cudnn
-
+from visdom import Visdom
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -47,6 +47,7 @@ logger.addHandler(file_handler)
 #device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
+epoch_loss = 0.0
 transform_train = transforms.Compose([
     transforms.RandomCrop(32, padding=4),
     transforms.RandomHorizontalFlip(),
@@ -102,7 +103,7 @@ def train(epoch):
     def backward():
 
         time.sleep(2)
-
+        global epoch_loss
         batch_idx = 0
         train_loss = 0
         correct = 0
@@ -114,6 +115,7 @@ def train(epoch):
                 outputs, targets = output_queue.get(block=True, timeout=args.wait)
             except Empty as e:
                 print("done.....")
+                epoch_loss = train_loss / (batch_idx + 1)
                 break
             loss = criterion(outputs, targets)
             loss.backward()
@@ -125,8 +127,6 @@ def train(epoch):
             correct += predicted.eq(targets).sum().item()
 
             progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                         % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-            logger.error('Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
             batch_idx += 1
 
@@ -149,6 +149,7 @@ def train(epoch):
 
 def train2(epoch):
     print('\nEpoch: %d' % epoch)
+    global epoch_loss
     net.train()
     train_loss = 0
     correct = 0
@@ -168,6 +169,7 @@ def train2(epoch):
 
         progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
             % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+    epoch_loss = train_loss/(batch_idx+1)
 
 
 
@@ -176,6 +178,7 @@ def train2(epoch):
 
 def test(epoch):
     global best_acc
+    global epoch_loss
     net.eval()
     test_loss = 0
     correct = 0
@@ -193,8 +196,8 @@ def test(epoch):
 
             progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                 % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
-            logger.error('Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
+        epoch_loss = test_loss / (batch_idx + 1)
+
 
     # Save checkpoint.
     acc = 100.*correct/total
@@ -215,5 +218,7 @@ def test(epoch):
 
 for epoch in range(start_epoch, start_epoch + 200):
     train2(epoch)
+    logger.error("--train_epoch:" + str(epoch) + "--loss:" + str(epoch_loss))
     test(epoch)
+    logger.error("--test_epoch:" + str(epoch) + "--loss:" + str(epoch_loss))
 
