@@ -149,6 +149,66 @@ class ResPipeNet(nn.Module):
 
 
 
+class THResPipeNet(nn.Module):
+    def __init__(self, size, wait, block, num_blocks, num_classes=10):
+        super(ResPipeNet, self).__init__()
+        self.in_planes = 64
+        self.queue12 = Queue(size)
+        self.queue23 = Queue(size)
+        self.queue34 = Queue(size)
+        self.wait = wait
+        with torch.cuda.device(0):
+            self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False).cuda()
+            self.bn1 = nn.BatchNorm2d(64).cuda()
+            self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1).cuda()
+        with torch.cuda.device(1):
+            self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2).cuda()
+        with torch.cuda.device(2):
+            self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2).cuda()
+        with torch.cuda.device(3):
+            self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2).cuda()
+            self.linear = nn.Linear(512*block.expansion, num_classes).cuda()
+
+    def _make_layer(self, block, planes, num_blocks, stride):
+        strides = [stride] + [1]*(num_blocks-1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_planes, planes, stride))
+            self.in_planes = planes * block.expansion
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.layer1(out)
+        self.queue12.put(out.cuda(1))
+        if self.queue12.qsize() > self.wait:
+            self.queue12.get()
+            out = self.layer2(out)
+            self.queue23.put(out.cuda(2))
+            if self.queue23.qsize() > self.wait:
+                out = self.queue23.get()
+                out = self.layer3(out)
+                self.queue34.put(out.cuda(3))
+                if self.queue34.qsize() > self.wait:
+                    out = self.queue34.get()
+                    out = self.layer4(out)
+                    out = F.avg_pool2d(out, 4)
+                    out = out.view(out.size(0), -1)
+                    out = self.linear(out)
+                return out
+            return out
+        return out
+
+
+
+
+
+
+
+
+
+
+
 
 
 
