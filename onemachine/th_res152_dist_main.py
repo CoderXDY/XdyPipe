@@ -17,9 +17,10 @@ from queue import Empty, Full
 import os
 import psutil
 import gc
-from resnet import ResNet18, ResNet34, ResNet50,  ResNet152
+from resnet import ResNet18
+from resnet152_dist import ResNet18, ResNet50
 import torch.backends.cudnn as cudnn
-
+from visdom import Visdom
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -28,7 +29,6 @@ parser.add_argument('-buffer_size', type=int, help='the size of buffer queue cac
 parser.add_argument('-batch_size', type=int, help='batch_size', default=128)
 parser.add_argument('-wait', type=int, help='wait to start thread', default=2)
 parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
-parser.add_argument('--par', '-p', action='store_true', help='data paralell')
 args = parser.parse_args()
 
 
@@ -41,7 +41,10 @@ logger.addHandler(file_handler)
 
 
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+
+
+#device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 epoch_loss = 0.0
@@ -66,16 +69,14 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False,
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 #torch.manual_seed(1)
-#net = ResNet18()
-net = ResNet18()
-net = net.to(device)
-net.share_memory()
-torch.multiprocessing.set_start_method("spawn")
+net = ResNet50()
+#net = net.to(device)
+#net.share_memory()
+#torch.multiprocessing.set_start_method("spawn")
 #cudnn.benchmark = True
-if device == 'cuda':
-    if args.par:
-        net = torch.nn.DataParallel(net)
-    cudnn.benchmark = True
+#if device == 'cuda':
+ #   net = torch.nn.DataParallel(net)
+cudnn.benchmark = True
 
 if args.resume:
     # Load checkpoint.
@@ -89,23 +90,24 @@ if args.resume:
     print("start_epoch: " + str(start_epoch))
 
 criterion = nn.CrossEntropyLoss()
+criterion.cuda(1)
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
 
 
 output_queue = Queue(args.buffer_size)
 
 def train(epoch):
+
     print('Epoch: %d' % epoch)
 
     def backward():
 
         time.sleep(2)
-
+        global epoch_loss
         batch_idx = 0
         train_loss = 0
         correct = 0
         total = 0
-        global epoch_loss
 
         while True:
             optimizer.zero_grad()
@@ -113,7 +115,7 @@ def train(epoch):
                 outputs, targets = output_queue.get(block=True, timeout=args.wait)
             except Empty as e:
                 print("done.....")
-                epoch_loss = (train_loss / (batch_idx + 1))
+                epoch_loss = train_loss / (batch_idx + 1)
                 break
             loss = criterion(outputs, targets)
             loss.backward()
@@ -131,20 +133,43 @@ def train(epoch):
     net.train()
 
     start_flag = True
-    first_count = 0
+
     for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
+        inputs, targets = inputs.cuda(0), targets.to(1)
         outputs = net(inputs)
         output_queue.put([outputs, targets])
-        if start_flag and output_queue.qsize() > args.wait:  # 2
+        if start_flag and output_queue.qsize() > args.wait: #2
             start_flag = False
             back_process = Process(target=backward)
             back_process.start()
 
+
     back_process.join()
 
 
+def train2(epoch):
+    print('\nEpoch: %d' % epoch)
+    global epoch_loss
+    net.train()
+    train_loss = 0
+    correct = 0
+    total = 0
+    for batch_idx, (inputs, targets) in enumerate(trainloader):
+        inputs, targets = inputs.to(0), targets.to(1)
+        optimizer.zero_grad()
+        outputs = net(inputs)
+        loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
 
+        train_loss += loss.item()
+        _, predicted = outputs.max(1)
+        total += targets.size(0)
+        correct += predicted.eq(targets).sum().item()
+
+        progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+            % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+    epoch_loss = train_loss/(batch_idx+1)
 
 
 
@@ -160,7 +185,7 @@ def test(epoch):
     total = 0
     with torch.no_grad():
         for batch_idx, (inputs, targets) in enumerate(testloader):
-            inputs, targets = inputs.to(device), targets.to(device)
+            inputs, targets = inputs.to(0), targets.to(1)
             outputs = net(inputs)
             loss = criterion(outputs, targets)
 
@@ -172,6 +197,7 @@ def test(epoch):
             progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                 % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
         epoch_loss = test_loss / (batch_idx + 1)
+
 
     # Save checkpoint.
     acc = 100.*correct/total
@@ -191,7 +217,8 @@ def test(epoch):
 
 
 for epoch in range(start_epoch, start_epoch + 200):
-    train(epoch)
+    train2(epoch)
     logger.error("--train_epoch:" + str(epoch) + "--loss:" + str(epoch_loss))
     test(epoch)
     logger.error("--test_epoch:" + str(epoch) + "--loss:" + str(epoch_loss))
+

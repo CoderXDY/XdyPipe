@@ -17,8 +17,11 @@ from queue import Empty, Full
 import os
 import psutil
 import gc
-from resnet import ResNet18, ResNet34, ResNet50,  ResNet152
+from resnet import ResNet18
+from resnet152_dist import ResNet50
+from resnet_pipe_model import ResPipeNet18, ResPipeNet50, THResPipeNet18, THResPipeNet50
 import torch.backends.cudnn as cudnn
+from visdom import Visdom
 
 
 parser = argparse.ArgumentParser()
@@ -28,7 +31,10 @@ parser.add_argument('-buffer_size', type=int, help='the size of buffer queue cac
 parser.add_argument('-batch_size', type=int, help='batch_size', default=128)
 parser.add_argument('-wait', type=int, help='wait to start thread', default=2)
 parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
-parser.add_argument('--par', '-p', action='store_true', help='data paralell')
+parser.add_argument('-mq', type=int, help='queue size of model', default=1)
+parser.add_argument('-mw', type=int, help='wait time of model', default=0)
+parser.add_argument('-count', type=int, help='first forward', default=1)
+
 args = parser.parse_args()
 
 
@@ -39,9 +45,6 @@ formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
 file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 
-
-
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 epoch_loss = 0.0
@@ -65,17 +68,23 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False,
 
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
-#torch.manual_seed(1)
-#net = ResNet18()
-net = ResNet18()
-net = net.to(device)
-net.share_memory()
-torch.multiprocessing.set_start_method("spawn")
-#cudnn.benchmark = True
-if device == 'cuda':
-    if args.par:
-        net = torch.nn.DataParallel(net)
-    cudnn.benchmark = True
+
+
+
+
+
+
+cudnn.benchmark = True
+
+
+
+net = ResPipeNet50(args.mq, args.mw)
+
+
+
+
+
+
 
 if args.resume:
     # Load checkpoint.
@@ -88,13 +97,19 @@ if args.resume:
     print("best_acc: " + str(best_acc))
     print("start_epoch: " + str(start_epoch))
 
+
+
 criterion = nn.CrossEntropyLoss()
+criterion.cuda(1)
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
 
 
 output_queue = Queue(args.buffer_size)
 
+
+
 def train(epoch):
+
     print('Epoch: %d' % epoch)
 
     def backward():
@@ -133,22 +148,19 @@ def train(epoch):
     start_flag = True
     first_count = 0
     for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(device), targets.to(device)
+        inputs, targets = inputs.cuda(0), targets.to(1)
         outputs = net(inputs)
+        if first_count < args.count:
+            first_count += 1
+            continue
         output_queue.put([outputs, targets])
-        if start_flag and output_queue.qsize() > args.wait:  # 2
+        if start_flag and output_queue.qsize() > args.wait: #2
             start_flag = False
             back_process = Process(target=backward)
             back_process.start()
 
+
     back_process.join()
-
-
-
-
-
-
-
 
 
 def test(epoch):
@@ -160,7 +172,7 @@ def test(epoch):
     total = 0
     with torch.no_grad():
         for batch_idx, (inputs, targets) in enumerate(testloader):
-            inputs, targets = inputs.to(device), targets.to(device)
+            inputs, targets = inputs.to(0), targets.to(1)
             outputs = net(inputs)
             loss = criterion(outputs, targets)
 
@@ -171,7 +183,7 @@ def test(epoch):
 
             progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                 % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
-        epoch_loss = test_loss / (batch_idx + 1)
+        epoch_loss = test_loss/(batch_idx+1)
 
     # Save checkpoint.
     acc = 100.*correct/total
