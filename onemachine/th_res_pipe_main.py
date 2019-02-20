@@ -21,7 +21,7 @@ from resnet import ResNet18
 from resnet152_dist import ResNet50
 from resnet_pipe_model import ResPipeNet18, ResPipeNet50, THResPipeNet18, THResPipeNet50
 import torch.backends.cudnn as cudnn
-from visdom import Visdom
+
 
 
 parser = argparse.ArgumentParser()
@@ -78,7 +78,7 @@ cudnn.benchmark = True
 
 
 
-net = ResPipeNet50(args.mq, args.mw)
+net = THResPipeNet50(args.mq, args.mw)
 
 
 
@@ -100,9 +100,9 @@ if args.resume:
 
 
 criterion = nn.CrossEntropyLoss()
-criterion.cuda(1)
+criterion.cuda(3)
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
-
+optimizer.zero_grad()
 
 output_queue = Queue(args.buffer_size)
 
@@ -123,7 +123,7 @@ def train(epoch):
         global epoch_loss
 
         while True:
-            optimizer.zero_grad()
+
             try:
                 outputs, targets = output_queue.get(block=True, timeout=args.wait)
             except Empty as e:
@@ -132,15 +132,19 @@ def train(epoch):
                 break
             loss = criterion(outputs, targets)
             loss.backward()
-            optimizer.step()
-
-            train_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
-
-            progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+            if batch_idx % 4 == 0:
+                optimizer.step()
+                train_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total += targets.size(0)
+                correct += predicted.eq(targets).sum().item()
+                progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                optimizer.zero_grad()
+            else:
+                progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                             % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+
             batch_idx += 1
 
     net.train()
@@ -148,7 +152,7 @@ def train(epoch):
     start_flag = True
     first_count = 0
     for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.cuda(0), targets.to(1)
+        inputs, targets = inputs.cuda(0), targets.to(3)
         outputs = net(inputs)
         if first_count < args.count:
             first_count += 1
@@ -172,7 +176,7 @@ def test(epoch):
     total = 0
     with torch.no_grad():
         for batch_idx, (inputs, targets) in enumerate(testloader):
-            inputs, targets = inputs.to(0), targets.to(1)
+            inputs, targets = inputs.to(0), targets.to(3)
             outputs = net(inputs)
             loss = criterion(outputs, targets)
 

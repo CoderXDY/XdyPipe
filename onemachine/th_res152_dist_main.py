@@ -18,9 +18,9 @@ import os
 import psutil
 import gc
 from resnet import ResNet18
-from resnet152_dist import ResNet18, ResNet50
+from resnet152_dist import ResNet18, ResNet50, THResNet18, THResNet50
 import torch.backends.cudnn as cudnn
-from visdom import Visdom
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -69,7 +69,7 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False,
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 #torch.manual_seed(1)
-net = ResNet50()
+net = THResNet50()
 #net = net.to(device)
 #net.share_memory()
 #torch.multiprocessing.set_start_method("spawn")
@@ -90,7 +90,7 @@ if args.resume:
     print("start_epoch: " + str(start_epoch))
 
 criterion = nn.CrossEntropyLoss()
-criterion.cuda(1)
+criterion.cuda(3)
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
 
 
@@ -135,7 +135,7 @@ def train(epoch):
     start_flag = True
 
     for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.cuda(0), targets.to(1)
+        inputs, targets = inputs.cuda(0), targets.to(3)
         outputs = net(inputs)
         output_queue.put([outputs, targets])
         if start_flag and output_queue.qsize() > args.wait: #2
@@ -155,7 +155,7 @@ def train2(epoch):
     correct = 0
     total = 0
     for batch_idx, (inputs, targets) in enumerate(trainloader):
-        inputs, targets = inputs.to(0), targets.to(1)
+        inputs, targets = inputs.to(0), targets.to(3)
         optimizer.zero_grad()
         outputs = net(inputs)
         loss = criterion(outputs, targets)
@@ -185,7 +185,7 @@ def test(epoch):
     total = 0
     with torch.no_grad():
         for batch_idx, (inputs, targets) in enumerate(testloader):
-            inputs, targets = inputs.to(0), targets.to(1)
+            inputs, targets = inputs.to(0), targets.to(3)
             outputs = net(inputs)
             loss = criterion(outputs, targets)
 

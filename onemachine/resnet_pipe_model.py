@@ -151,7 +151,7 @@ class ResPipeNet(nn.Module):
 
 class THResPipeNet(nn.Module):
     def __init__(self, size, wait, block, num_blocks, num_classes=10):
-        super(ResPipeNet, self).__init__()
+        super(THResPipeNet, self).__init__()
         self.in_planes = 64
         self.queue12 = Queue(size)
         self.queue23 = Queue(size)
@@ -182,7 +182,7 @@ class THResPipeNet(nn.Module):
         out = self.layer1(out)
         self.queue12.put(out.cuda(1))
         if self.queue12.qsize() > self.wait:
-            self.queue12.get()
+            out = self.queue12.get()
             out = self.layer2(out)
             self.queue23.put(out.cuda(2))
             if self.queue23.qsize() > self.wait:
