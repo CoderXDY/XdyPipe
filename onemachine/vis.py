@@ -29,7 +29,7 @@ for path in path_list:
     losss = []
     with open(path, 'r') as f:
         for line in f:
-            strs = f.strip().split('--')
+            strs = line.strip().split('--')
             loss = strs[1].split(":")[1]
             losss.append(loss)
     name_loss[path] = losss
