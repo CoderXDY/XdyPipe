@@ -1,15 +1,14 @@
 import torch
-from torch.autograd import Variable as V
 import torch.distributed as dist
 from torch import nn as nn
 import argparse
-from torch.multiprocessing import Process, Queue, Value, Event
-from multiprocessing.managers import BaseManager as bm
+from torch.multiprocessing import Queue, Event
+from multiprocessing.dummy import Process
 import torch.nn.functional as F
 import torch.optim as optim
 import logging
 import time
-from res import BasicBlock, Bottleneck, ResInputLayer, ResBlockLayer, ResOutputLayer
+from res import THResNetGroup0, THResNetGroup1
 import torchvision
 import torchvision.transforms as transforms
 from utils import progress_bar
@@ -18,7 +17,7 @@ from queue import Empty, Full
 import os
 import psutil
 import gc
-
+import torch.backends.cudnn as cudnn
 """
  pipeline ResNet script for Tianhe-2  with gpu cluster
 
@@ -572,7 +571,7 @@ def test(layer, e, acc, args, logger, loader=None):
 
 
 
-def run(queue, layer, global_event, epoch_event, acc, args, train_loader=None, test_loader=None):
+def run(queue, layer, global_event, epoch_event, args, train_loader=None, test_loader=None):
 
     logger = logging.getLogger('rank-' + str(dist.get_rank()))
     file_handler = logging.FileHandler('/WORK/sysu_wgwu_4/xpipe/XPipe/rank-' + str(dist.get_rank()) + '.log')
@@ -584,17 +583,7 @@ def run(queue, layer, global_event, epoch_event, acc, args, train_loader=None, t
     logger.addHandler(file_handler)
 
     start_epoch = 0
-    epoch_num = args.epoch
-    r = dist.get_rank()
-    best_acc = 0.0
-    if r in [0, 1, 2, 3, 4, 5]:
-        if True and os.path.isdir('checkpoint'):
-            checkpoint = torch.load('./checkpoint/rank-' + str(r) + '_ckpt.t7')
-            layer.load_state_dict(checkpoint['net'])
-            start_epoch = checkpoint['epoch']
-            best_acc = checkpoint['acc']
-            logger.error("load the model: start_epoch: " + str(start_epoch) + " best_acc: " + str(best_acc))
-
+    epoch_num = 200
     for epoch in range(start_epoch, start_epoch + epoch_num):
         logger.error("training epoch-" + str(epoch) + '.........................................................................')
         layer.train()
@@ -626,13 +615,120 @@ def run(queue, layer, global_event, epoch_event, acc, args, train_loader=None, t
     else:
         global_event.wait()
 
+def train(layer, grad_queue, targets_queue, loader):
+    criterion = nn.CrossEntropyLoss()
+    criterion.cuda()
+    optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+    optimizer.zero_grad()
 
-def init_processes(fn, args, queue, layer, rank, global_event, epoch_event, acc):
+    def backward0():
+        pass
+    def backward1():
+        batch_idx = 0
+        train_loss = 0
+        correct = 0
+        total = 0
+        global epoch_loss
+        while True:
+            try:
+                targets = targets_queue.get(block=True, timeout=2)
+            except Empty as e:
+                epoch_loss = (train_loss / (batch_idx + 1))
+                break
+            loss = criterion(outputs, targets)
+            loss.backward()
+            if batch_idx % 4 == 0:
+                optimizer.step()
+                train_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total += targets.size(0)
+                correct += predicted.eq(targets).sum().item()
+                progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                             % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                optimizer.zero_grad()
+            else:
+                progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                             % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+
+            batch_idx += 1
+
+
+
+
+    layer.train()
+    if dist.get_rank() == 0:
+        for batch_idx, (inputs, targets) in enumerate(loader):
+            inputs, targets = inputs.cuda(), targets
+            outputs = layer(inputs)
+            targets_queue.put(targets)
+            send_opt = dist.isend(tensor=outputs, dst=1)
+            send_opt.wait()
+    elif dist.get_rank() == 1:
+        while True:
+            try:
+                rec_val = torch.zeros([batch_size, 256, 8, 8])
+                dist.recv(tensor=rec_val, src=0)
+            except RuntimeError as error:
+                break
+            outputs = layer(rec_val.requires_grad_())
+
+
+
+
+
+
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-ip', help='the ip of master',default='89.72.2.41')
+    parser.add_argument('-size', type=int, help='input the sum of node', default=12)
+    parser.add_argument('-path', help='the path fo share file system')
+    parser.add_argument('-rank', type=int, help='the rank of process')
+    parser.add_argument('-layer_type', type=int, help='type of layer: input:0, block:1, output:2')
+    parser.add_argument('-batch_size', type=int, help='size of batch')
+    parser.add_argument('-data_worker', type=int, help='the number of dataloader worker')
+    parser.add_argument('-epoch', type=int)
+    parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
+    args = parser.parse_args()
+    print("ip: " + args.ip)
+    print("size: " + str(args.size))
+    print("path: " + args.path)
+    print("rank: " + str(args.rank))
+    print("buffer_size: " + str(args.buffer_size))
+    print("layer_type: " + str(args.layer_type))
+    print("batch_size: " + str(args.batch_size))
+    print("data_worker: " + str(args.data_worker))
+
+
+    torch.manual_seed(1)
+
+    bm.register('get_epoch_event')
+    bm.register('get_global_event')
+    bm.register('get_grad_queue')
+    bm.register('get_targets_queue')
+
+    m = bm(address=(args.ip, 5000), authkey=b'xpipe')
+    m.connect()
+    global_event = m.get_global_event()
+    epoch_event = m.get_epoch_event()
+    grad_queue = get_grad_queue()
+    targets_queue = targets_queue()
+    if args.layer_type == 0:
+        layer = THResNetGroup0()
+    elif args.layer_type == 1:
+        layer = THResNetGroup1()
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    #layer.share_memory()
+    cudnn.benchmark = True
+
+    if args.resume:
+        pass
+
     print("init process-" + str(rank) + "....")
-    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=rank)
+    dist.init_process_group(backend='tcp', init_method=args.path, world_size=2, rank=args.rank)
 
-    if rank == 0 or rank == 6:
-
+    if args.layer_type == 0:
         transform_train = transforms.Compose([
             transforms.RandomCrop(32, padding=4),
             transforms.RandomHorizontalFlip(),
@@ -642,7 +738,7 @@ def init_processes(fn, args, queue, layer, rank, global_event, epoch_event, acc)
 
         trainset = torchvision.datasets.CIFAR10(root='../data', train=True, download=False, transform=transform_train)
 
-        #pin memory
+        # pin memory
         trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=False,
                                                   num_workers=args.data_worker, drop_last=True)
 
@@ -657,101 +753,5 @@ def init_processes(fn, args, queue, layer, rank, global_event, epoch_event, acc)
 
         classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
+    run()
 
-    if rank == 5:
-        transform_test = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        ])
-
-        testset = torchvision.datasets.CIFAR10(root='../data', train=False, download=False, transform=transform_test)
-        testloader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size, shuffle=False,
-                                                 num_workers=args.data_worker, drop_last=True)
-
-    if rank == 0:
-        fn(queue, layer, global_event, epoch_event, acc, args, train_loader=trainloader, test_loader=testloader)
-    elif rank == 5:
-        fn(queue, layer, global_event, epoch_event, acc, args, test_loader=testloader)
-    elif rank == 6:
-        fn(queue, layer, global_event, epoch_event,acc, args, train_loader=trainloader, test_loader=testloader)
-    else:
-        fn(queue, layer, global_event, epoch_event, acc, args)
-
-
-if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-ip', help='the ip of master',default='89.72.2.41')
-    parser.add_argument('-size', type=int, help='input the sum of node', default=12)
-    parser.add_argument('-path', help='the path fo share file system')
-    parser.add_argument('-rank', type=int, help='the rank of process')
-
-    parser.add_argument('-buffer_size', type=int, help='the size of buffer queue caching the batch data', default=16)
-
-    parser.add_argument('-layer_type', type=int, help='type of layer: input:0, block:1, output:2')
-
-    parser.add_argument('-basic', help='if True, using basicblock for ResNet, else use Bottleneck')
-    parser.add_argument('-out_plane', type=int, help='out_plane for cnn')
-    parser.add_argument('-num_block', type=int, help='number of block (BasicBlock or Bottleneck)')
-    parser.add_argument('-stride',  type=int, help='stride.....')
-    parser.add_argument('-in_plane', type=int, help='in_plane for cnn')
-
-
-    parser.add_argument('-batch_size', type=int, help='size of batch')
-    parser.add_argument('-data_worker', type=int, help='the number of dataloader worker')
-    parser.add_argument('-epoch', type=int)
-    parser.add_argument('-package_size', type=int)
-    parser.add_argument('-send_num', type=int)
-
-
-
-    args = parser.parse_args()
-    print("ip: " + args.ip)
-    print("size: " + str(args.size))
-    print("path: " + args.path)
-    print("rank: " + str(args.rank))
-    print("buffer_size: " + str(args.buffer_size))
-    print("layer_type: " + str(args.layer_type))
-    print("basic: " + args.basic)
-    print("out_plane: " + str(args.out_plane))
-    print("num_block: " + str(args.num_block))
-    print("stride: " + str(args.stride))
-    print("in_plane: " + str(args.in_plane))
-    print("batch_size: " + str(args.batch_size))
-    print("data_worker: " + str(args.data_worker))
-
-    time.sleep(2)
-
-    #torch.manual_seed(1)
-
-    bm.register('get_epoch_event')
-    bm.register('get_global_event')
-    bm.register('get_acc')
-
-    m = bm(address=(args.ip, 5000), authkey=b'xpipe')
-    m.connect()
-    global_event = m.get_global_event()
-    epoch_event = m.get_epoch_event()
-    acc = m.get_acc()
-
-    queue = Queue(args.buffer_size)
-
-    if args.layer_type == 0:
-        layer = ResInputLayer()
-    elif args.layer_type == 1:
-        layer = ResBlockLayer(BasicBlock if args.basic == 'True' else Bottleneck,
-                              args.out_plane,
-                              args.num_block,
-                              args.stride,
-                              args.in_plane)
-    elif args.layer_type == 2:
-        layer = ResOutputLayer(BasicBlock if args.basic == 'True' else Bottleneck)
-
-    layer.share_memory()
-
-    f_p = Process(target=init_processes, args=(run, args, queue, layer, args.rank, global_event, epoch_event, acc))
-    f_p.start()
-    b_p = Process(target=init_processes, args=(run, args, queue, layer, (11 - args.rank), global_event, epoch_event, acc))
-    b_p.start()
-    f_p.join()
-    b_p.join()

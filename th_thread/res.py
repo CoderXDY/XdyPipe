@@ -110,4 +110,34 @@ class ResOutputLayer(nn.Module):
         return out
 
 
+"""
 
+ResNet18 splits two groups to develop in Th-2
+
+"""
+class THResNetGroup0(nn.Module):
+    def __init__(self):
+        super(THResNetGroup0, self).__init__()
+        self.layer0 = ResInputLayer()
+        self.layer1 = ResBlockLayer(BasicBlock, 64, 2, 1, 64)
+        self.layer2 = ResBlockLayer(BasicBlock, 128, 2, 2, 64)
+
+    def forward(self, x):
+        out = self.layer0(x)
+        out = self.layer1(out)
+        out = self.layer3(out)
+        return out
+
+
+class THResNetGroup1(nn.Module):
+    def __init__(self):
+        super(THResNetGroup1, self).__init__()
+        self.layer0 = ResBlockLayer(BasicBlock, 256, 2, 2, 128)
+        self.layer1 = ResBlockLayer(BasicBlock, 512, 2, 2, 256)
+        self.layer2 = ResBlockLayer(BasicBlock)
+
+    def forward(self, x):
+        out = self.layer0(x)
+        out = self.layer1(out)
+        out = self.layer2(out)
+        return out
