@@ -2,7 +2,8 @@ import torch
 import torch.distributed as dist
 from torch import nn as nn
 import argparse
-#from torch.multiprocessing import Process, Queue, Value, Event
+from torch.multiprocessing import Process as Pro
+from torch.multiprocessing import Queue as Que
 #from multiprocessing.managers import BaseManager as bm
 from multiprocessing.dummy import Process, Queue
 import torch.nn.functional as F
@@ -70,7 +71,7 @@ classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship'
 net = ResNet18()
 net = net.to(device)
 net.share_memory()
-torch.multiprocessing.set_start_method("spawn")
+#torch.multiprocessing.set_start_method("spawn")
 #cudnn.benchmark = True
 if device == 'cuda':
     if args.par:
@@ -187,11 +188,59 @@ def test(epoch):
         torch.save(state, './checkpoint/ckpt.t7')
         best_acc = acc
 
+backward_queue = Que(args.buffer_size)
+
+def train_process(epoch):
+    print('train waith process Epoch: %d' % epoch)
+
+    def backward():
+
+        batch_idx = 0
+        train_loss = 0
+        correct = 0
+        total = 0
+        global epoch_loss
+
+        while True:
+            optimizer.zero_grad()
+            try:
+                outputs, targets = backward_queue.get(block=True, timeout=args.wait)
+            except Empty as e:
+                print("done.....")
+                epoch_loss = (train_loss / (batch_idx + 1))
+                break
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item()
+            _, predicted = outputs.max(1)
+            total += targets.size(0)
+            correct += predicted.eq(targets).sum().item()
+
+            progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                         % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+            batch_idx += 1
+
+    net.train()
+
+    start_flag = True
+
+    for batch_idx, (inputs, targets) in enumerate(trainloader):
+        inputs, targets = inputs.to(device), targets.to(device)
+        outputs = net(inputs)
+        backward_queue.put([outputs, targets])
+        if start_flag and output_queue.qsize() > args.wait:  # 2
+            start_flag = False
+            back_process = Pro(target=backward)
+            back_process.start()
+
+    back_process.join()
 
 
 
 for epoch in range(start_epoch, start_epoch + 200):
-    train(epoch)
+    train_process(epoch)
     logger.error("--train_epoch:" + str(epoch) + "--loss:" + str(epoch_loss))
     test(epoch)
     logger.error("--test_epoch:" + str(epoch) + "--loss:" + str(epoch_loss))
