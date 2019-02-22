@@ -623,7 +623,15 @@ def train(layer, grad_queue, targets_queue, loader):
 
     def backward0():
         pass
-    def backward1():
+    layer.train()
+    if dist.get_rank() == 0:
+        for batch_idx, (inputs, targets) in enumerate(loader):
+            inputs, targets = inputs.cuda(), targets
+            outputs = layer(inputs)
+            targets_queue.put(targets)
+            send_opt = dist.isend(tensor=outputs, dst=1)
+            send_opt.wait()
+    elif dist.get_rank() == 1:
         batch_idx = 0
         train_loss = 0
         correct = 0
@@ -631,13 +639,17 @@ def train(layer, grad_queue, targets_queue, loader):
         global epoch_loss
         while True:
             try:
-                targets = targets_queue.get(block=True, timeout=2)
-            except Empty as e:
+                rec_val = torch.zeros([batch_size, 256, 8, 8])
+                dist.recv(tensor=rec_val, src=0)
+            except RuntimeError as error:
                 epoch_loss = (train_loss / (batch_idx + 1))
                 break
+            outputs = layer(rec_val.requires_grad_())
+            targets = targets_queue.get(block=True, timeout=2)
             loss = criterion(outputs, targets)
             loss.backward()
-            if batch_idx % 4 == 0:
+            grad_queue.put(rec_val)
+            if batch_idx % 2 == 0:
                 optimizer.step()
                 train_loss += loss.item()
                 _, predicted = outputs.max(1)
@@ -651,26 +663,6 @@ def train(layer, grad_queue, targets_queue, loader):
                              % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
 
             batch_idx += 1
-
-
-
-
-    layer.train()
-    if dist.get_rank() == 0:
-        for batch_idx, (inputs, targets) in enumerate(loader):
-            inputs, targets = inputs.cuda(), targets
-            outputs = layer(inputs)
-            targets_queue.put(targets)
-            send_opt = dist.isend(tensor=outputs, dst=1)
-            send_opt.wait()
-    elif dist.get_rank() == 1:
-        while True:
-            try:
-                rec_val = torch.zeros([batch_size, 256, 8, 8])
-                dist.recv(tensor=rec_val, src=0)
-            except RuntimeError as error:
-                break
-            outputs = layer(rec_val.requires_grad_())
 
 
 
