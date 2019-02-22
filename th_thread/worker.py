@@ -3,10 +3,12 @@ import torch.distributed as dist
 from torch import nn as nn
 import argparse
 from torch.multiprocessing import Queue, Event
+from multiprocessing.managers import BaseManager as bm
 from multiprocessing.dummy import Process
 from multiprocessing.dummy import Queue as ThreadQueue
 import torch.nn.functional as F
 import torch.optim as optim
+import multiprocessing
 import logging
 import time
 from res import THResNetGroup0, THResNetGroup1
@@ -23,9 +25,9 @@ import torch.backends.cudnn as cudnn
  pipeline ResNet script for Tianhe-2  with gpu cluster
 
 """
-def train(layer, logger, grad_queue, targets_queue, e, trainloader):
+def train(layer, logger, args, rad_queue, targets_queue, e, trainloader):
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(layer.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+    optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     optimizer.zero_grad()
     layer.train()
 
@@ -52,9 +54,13 @@ def train(layer, logger, grad_queue, targets_queue, e, trainloader):
         for batch_idx, (inputs, targets) in enumerate(trainloader):
             inputs, targets = inputs.cuda(0), targets
             outputs = layer(inputs)
+            targets.share_memory_()
             outputs_queue.put(outputs)
-            targets_queue.put(targets)
-            send_opt = dist.isend(tensor=outputs, dst=1)
+            try:
+                targets_queue.put(targets)
+            except Exception as ex:
+                logger.error("ex:  ", exc_info=True)
+            send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
             send_opt.wait()
             if start_flag and grad_queue.qsize() > 0:
                 start_flag = False
@@ -72,7 +78,7 @@ def train(layer, logger, grad_queue, targets_queue, e, trainloader):
         criterion.cuda(1)
         while True:
             try:
-                rec_val = torch.zeros([batch_size, 256, 8, 8])
+                rec_val = torch.zeros([args.batch_size, 256, 8, 8])
                 dist.recv(tensor=rec_val, src=0)
             except RuntimeError as error:
                 e.wait()
@@ -100,7 +106,7 @@ def train(layer, logger, grad_queue, targets_queue, e, trainloader):
 
             batch_idx += 1
 
-def eval(layer, logger, targets_queue, e, save_event, testloader):
+def eval(layer, logger, args, targets_queue, e, save_event, testloader):
     criterion = nn.CrossEntropyLoss()
     criterion.cuda()
     layer.eval()
@@ -125,7 +131,7 @@ def eval(layer, logger, targets_queue, e, save_event, testloader):
             global best_acc
             while True:
                 try:
-                    rec_val = torch.zeros([batch_size, 256, 8, 8])
+                    rec_val = torch.zeros([args.batch_size, 256, 8, 8])
                     dist.recv(tensor=rec_val, src=0)
                 except RuntimeError as error:
                     acc = 100. * correct / total
@@ -149,7 +155,7 @@ def eval(layer, logger, targets_queue, e, save_event, testloader):
 
 
 
-def run(start_epoch, layer, grad_queue, targets_queue, global_event, epoch_event, save_event, trainloader, testloader):
+def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, trainloader, testloader):
     logger = logging.getLogger('rank-' + str(dist.get_rank()))
     file_handler = logging.FileHandler('rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
@@ -161,10 +167,10 @@ def run(start_epoch, layer, grad_queue, targets_queue, global_event, epoch_event
     r = dist.get_rank()
     for epoch in range(start_epoch, start_epoch + epoch_num):
         print('Training epoch: %d' % epoch)
-        train(layer, logger, grad_queue, targets_queue, epoch_event, trainloader)
+        train(layer, logger, args, grad_queue, targets_queue, epoch_event, trainloader)
         epoch_event.clear()
         print('Eval epoch: %d' % epoch)
-        eval(layer, logger, targets_queue, epoch_event, save_event, testloader)
+        eval(layer, logger, args, targets_queue, epoch_event, save_event, testloader)
         epoch_event.clear()
         if save_event.is_set():
             print('Saving..')
@@ -200,7 +206,6 @@ if __name__ == "__main__":
     print("size: " + str(args.size))
     print("path: " + args.path)
     print("rank: " + str(args.rank))
-    print("buffer_size: " + str(args.buffer_size))
     print("layer_type: " + str(args.layer_type))
     print("batch_size: " + str(args.batch_size))
     print("data_worker: " + str(args.data_worker))
@@ -217,10 +222,10 @@ if __name__ == "__main__":
     m.connect()
     global_event = m.get_global_event()
     epoch_event = m.get_epoch_event()
-    grad_queue = get_grad_queue()
-    targets_queue = get_targets_queue()
-    save_event = get_save_event()
-
+    grad_queue = m.get_grad_queue()
+    targets_queue = m.get_targets_queue()
+    save_event = m.get_save_event()
+    print(type(targets_queue))
     if args.layer_type == 0:
         layer = THResNetGroup0()
         layer.cuda(0)
@@ -244,8 +249,8 @@ if __name__ == "__main__":
         print("best_acc: " + str(best_acc))
         print("start_epoch: " + str(start_epoch))
 
-    print("init process-" + str(rank) + "....")
-    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
+    print("init process-" + str(args.rank) + "....")
+    dist.init_process_group(backend='gloo', init_method=args.path, world_size=args.size, rank=args.rank)
 
     if args.layer_type == 0:
         transform_train = transforms.Compose([
@@ -274,5 +279,5 @@ if __name__ == "__main__":
         testloader = None
 
 
-    run(start_epoch, layer, grad_queue, targets_queue, global_event, epoch_event, save_event, trainloader, testloader)
+    run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, trainloader, testloader)
 

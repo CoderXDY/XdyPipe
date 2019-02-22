@@ -125,7 +125,7 @@ class THResNetGroup0(nn.Module):
     def forward(self, x):
         out = self.layer0(x)
         out = self.layer1(out)
-        out = self.layer3(out)
+        out = self.layer2(out)
         return out
 
 
@@ -134,7 +134,7 @@ class THResNetGroup1(nn.Module):
         super(THResNetGroup1, self).__init__()
         self.layer0 = ResBlockLayer(BasicBlock, 256, 2, 2, 128)
         self.layer1 = ResBlockLayer(BasicBlock, 512, 2, 2, 256)
-        self.layer2 = ResBlockLayer(BasicBlock)
+        self.layer2 = ResOutputLayer(BasicBlock)
 
     def forward(self, x):
         out = self.layer0(x)
