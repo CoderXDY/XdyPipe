@@ -250,7 +250,7 @@ if __name__ == "__main__":
         print("start_epoch: " + str(start_epoch))
 
     print("init process-" + str(args.rank) + "....")
-    dist.init_process_group(backend='gloo', init_method=args.path, world_size=args.size, rank=args.rank)
+    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
 
     if args.layer_type == 0:
         transform_train = transforms.Compose([
