@@ -21,6 +21,7 @@ import os
 import psutil
 import gc
 import torch.backends.cudnn as cudnn
+import numpy as np
 """
  pipeline ResNet script for Tianhe-2  with gpu cluster
 
@@ -36,7 +37,7 @@ def train(layer, logger, args, rad_queue, targets_queue, e, trainloader):
         while True:
             try:
                 grad = grad_queue.get(block=True, timeout=1)
-                grad = grad.cuda(1)
+                grad = grad.from_numpy().cuda(1)
             except Empty as empty:
                 break
             loss = outputs_queue.get(block=False)
@@ -54,12 +55,8 @@ def train(layer, logger, args, rad_queue, targets_queue, e, trainloader):
         for batch_idx, (inputs, targets) in enumerate(trainloader):
             inputs, targets = inputs.cuda(0), targets
             outputs = layer(inputs)
-            targets.share_memory_()
             outputs_queue.put(outputs)
-            try:
-                targets_queue.put(targets)
-            except Exception as ex:
-                logger.error("ex:  ", exc_info=True)
+            targets_queue.put(targets.numpy())
             send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
             send_opt.wait()
             if start_flag and grad_queue.qsize() > 0:
@@ -85,10 +82,10 @@ def train(layer, logger, args, rad_queue, targets_queue, e, trainloader):
                 break
             outputs = layer(rec_val.cuda(1).requires_grad_())
             targets = targets_queue.get(block=True, timeout=2)
-            targets = targets.cuda(1)
+            targets = targets.from_numpy().cuda(1)
             loss = criterion(outputs, targets)
             loss.backward()
-            grad_queue.put(rec_val.grad)
+            grad_queue.put(rec_val.grad.numpy())
             if batch_idx % 2 == 0:
                 optimizer.step()
                 train_loss += loss.item()
