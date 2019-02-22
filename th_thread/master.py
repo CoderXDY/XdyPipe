@@ -21,9 +21,7 @@ epoch_event = Event()
 global_event = Event()
 save_event = Event()
 
-grad_queue = Queue(args.buffer)
 
-targets_queue = Queue(args.buffer)
 
 def get_epoch_event():
     return epoch_event
@@ -33,7 +31,7 @@ def get_global_event():
 
 def get_save_event():
     return save_event
-
+#/home/xdy/projects/XdyPipe/th_thread
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
@@ -43,7 +41,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if os.path.exists(args.path):
         os.remove(args.path)
-
+    grad_queue = Queue(args.buffer)
+    targets_queue = Queue(args.buffer)
     bm.register('get_epoch_event', callable=get_epoch_event)
     bm.register('get_global_event', callable=get_global_event)
     bm.register('get_grad_queue', callable=lambda: grad_queue)
