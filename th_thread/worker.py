@@ -59,6 +59,7 @@ def train(layer, logger, args, rad_queue, targets_queue, e, trainloader):
             targets_queue.put(targets.numpy())
             send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
             send_opt.wait()
+            print("send....")
             if start_flag and grad_queue.qsize() > 0:
                 start_flag = False
                 back_process = Process(target=backward)
@@ -77,6 +78,7 @@ def train(layer, logger, args, rad_queue, targets_queue, e, trainloader):
             try:
                 rec_val = torch.zeros([args.batch_size, 256, 8, 8])
                 dist.recv(tensor=rec_val, src=0)
+                print("recv.......")
             except RuntimeError as error:
                 e.wait()
                 break
@@ -247,7 +249,7 @@ if __name__ == "__main__":
         print("start_epoch: " + str(start_epoch))
 
     print("init process-" + str(args.rank) + "....")
-    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
+    dist.init_process_group(backend='gloo', init_method=args.path, world_size=args.size, rank=args.rank)
 
     if args.layer_type == 0:
         transform_train = transforms.Compose([
