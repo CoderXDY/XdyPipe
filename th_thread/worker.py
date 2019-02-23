@@ -26,7 +26,7 @@ import numpy as np
  pipeline ResNet script for Tianhe-2  with gpu cluster
 
 """
-def train(layer, logger, args, rad_queue, targets_queue, e, trainloader):
+def train(layer, logger, args, rad_queue, targets_queue, e, data_size, trainloader):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     optimizer.zero_grad()
@@ -37,7 +37,7 @@ def train(layer, logger, args, rad_queue, targets_queue, e, trainloader):
         while True:
             try:
                 grad = grad_queue.get(block=True, timeout=1)
-                grad = grad.from_numpy().cuda(1)
+                grad = torch.from_numpy(grad).cuda(0)
             except Empty as empty:
                 break
             loss = outputs_queue.get(block=False)
@@ -51,12 +51,15 @@ def train(layer, logger, args, rad_queue, targets_queue, e, trainloader):
     if dist.get_rank() == 0:
         criterion.cuda(0)
         start_flag = True
-        outputs_queue = ThreadQueue(2)
+        outputs_queue = ThreadQueue(4)
         for batch_idx, (inputs, targets) in enumerate(trainloader):
+            print("batch: " + str(batch_idx))
             inputs, targets = inputs.cuda(0), targets
             outputs = layer(inputs)
             outputs_queue.put(outputs)
+            print('put......')
             targets_queue.put(targets.numpy())
+            print(outputs.cpu().size())
             send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
             send_opt.wait()
             print("send....")
@@ -76,36 +79,38 @@ def train(layer, logger, args, rad_queue, targets_queue, e, trainloader):
         criterion.cuda(1)
         while True:
             try:
-                rec_val = torch.zeros([args.batch_size, 256, 8, 8])
+                rec_val = torch.zeros([args.batch_size, 128, 16, 16])
                 dist.recv(tensor=rec_val, src=0)
                 print("recv.......")
             except RuntimeError as error:
                 e.wait()
                 break
-            outputs = layer(rec_val.cuda(1).requires_grad_())
+            rec_val = rec_val.cuda(1)
+            rec_val.requires_grad_()
+            outputs = layer(rec_val)
             targets = targets_queue.get(block=True, timeout=2)
-            targets = targets.from_numpy().cuda(1)
+            targets = torch.from_numpy(targets).cuda(1)
             loss = criterion(outputs, targets)
             loss.backward()
-            grad_queue.put(rec_val.grad.numpy())
+            grad_queue.put(rec_val.grad.cpu().numpy())
             if batch_idx % 2 == 0:
                 optimizer.step()
                 train_loss += loss.item()
                 _, predicted = outputs.max(1)
                 total += targets.size(0)
                 correct += predicted.eq(targets).sum().item()
-                progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                              % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
                 optimizer.zero_grad()
             else:
-                progress_bar(batch_idx, len(trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                              % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
             if batch_idx % 10 == 0:
                 logger.error("train:" + str(train_loss / (batch_idx + 1)))
 
             batch_idx += 1
 
-def eval(layer, logger, args, targets_queue, e, save_event, testloader):
+def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
     criterion = nn.CrossEntropyLoss()
     criterion.cuda()
     layer.eval()
@@ -115,8 +120,9 @@ def eval(layer, logger, args, targets_queue, e, save_event, testloader):
             for batch_idx, (inputs, targets) in enumerate(testloader):
                 inputs, targets = inputs.cuda(0), targets
                 outputs = layer(inputs)
-                targets_queue.put(targets)
-                send_opt = dist.isend(tensor=outputs, dst=1)
+                targets_queue.put(targets.numpy())
+                print(outputs.size())
+                send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
                 send_opt.wait()
             send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
             send_opt.wait()
@@ -130,31 +136,33 @@ def eval(layer, logger, args, targets_queue, e, save_event, testloader):
             global best_acc
             while True:
                 try:
-                    rec_val = torch.zeros([args.batch_size, 256, 8, 8])
+                    rec_val = torch.zeros([100, 128, 16, 16])
                     dist.recv(tensor=rec_val, src=0)
                 except RuntimeError as error:
+                    print("done....")
                     acc = 100. * correct / total
                     if acc > best_acc:
                         best_acc = acc
                         save_event.set()
                     e.set()
                     break
-                outputs = layer(rec_val)
+                outputs = layer(rec_val.cuda(1))
                 targets = targets_queue.get(block=True, timeout=2)
+                targets = torch.from_numpy(targets).cuda(1)
                 loss = criterion(outputs, targets)
                 test_loss += loss.item()
                 _, predicted = outputs.max(1)
                 total += targets.size(0)
                 correct += predicted.eq(targets).sum().item()
 
-                progress_bar(batch_idx, len(testloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                              % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
                 if batch_idx % 10 == 0:
-                    logger.error("train:" + str(train_loss / (batch_idx + 1)))
+                    logger.error("eval:" + str(test_loss / (batch_idx + 1)))
 
 
 
-def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, trainloader, testloader):
+def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader):
     logger = logging.getLogger('rank-' + str(dist.get_rank()))
     file_handler = logging.FileHandler('rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
@@ -166,10 +174,10 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
     r = dist.get_rank()
     for epoch in range(start_epoch, start_epoch + epoch_num):
         print('Training epoch: %d' % epoch)
-        train(layer, logger, args, grad_queue, targets_queue, epoch_event, trainloader)
+        train(layer, logger, args, grad_queue, targets_queue, epoch_event, train_size, trainloader)
         epoch_event.clear()
         print('Eval epoch: %d' % epoch)
-        eval(layer, logger, args, targets_queue, epoch_event, save_event, testloader)
+        eval(layer, logger, args, targets_queue, epoch_event, save_event, test_size, testloader)
         epoch_event.clear()
         if save_event.is_set():
             print('Saving..')
@@ -178,8 +186,6 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
                 'acc': best_acc,
                 'epoch': epoch,
             }
-            if not os.path.isdir('checkpoint'):
-                os.mkdir('checkpoint')
             torch.save(state, './checkpoint/rank-' + str(r) + '_ckpt.t7')
     if r == 0:
         global_event.wait()
@@ -249,9 +255,9 @@ if __name__ == "__main__":
         print("start_epoch: " + str(start_epoch))
 
     print("init process-" + str(args.rank) + "....")
-    dist.init_process_group(backend='gloo', init_method=args.path, world_size=args.size, rank=args.rank)
+    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
 
-    if args.layer_type == 0:
+    if True:
         transform_train = transforms.Compose([
             transforms.RandomCrop(32, padding=4),
             transforms.RandomHorizontalFlip(),
@@ -273,10 +279,12 @@ if __name__ == "__main__":
         testset = torchvision.datasets.CIFAR10(root='../data', train=False, download=False, transform=transform_test)
         testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False,
                                                  num_workers=args.data_worker, drop_last=True)
-    else:
+        train_size = len(trainloader)
+        test_size = len(testloader)
+    if args.layer_type == 1:
         trainloader = None
         testloader = None
 
-
-    run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, trainloader, testloader)
+    
+    run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader)
 
