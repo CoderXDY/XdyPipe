@@ -246,8 +246,7 @@ if __name__ == "__main__":
     if args.resume:
         print('==> Resuming from checkpoint..')
         assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-        r = dist.get_rank()
-        checkpoint = torch.load('./checkpoint/rank-' + str(r) + '_ckpt.t7')
+        checkpoint = torch.load('./checkpoint/rank-' + str(args.rank) + '_ckpt.t7')
         layer.load_state_dict(checkpoint['net'])
         best_acc = checkpoint['acc']
         start_epoch = checkpoint['epoch']
