@@ -26,6 +26,42 @@ import numpy as np
  pipeline ResNet script for Tianhe-2  with gpu cluster
 
 """
+
+
+
+def sparse(tensor, k, residual=None):
+    #index_value = [(i, dense_tensor[i]) for i in range(dense_tensor) if dense_tensor[i] > 0]
+    #index, value = zip(*index_value)
+    length = 1
+    tensor_size = tensor.size()
+    for i in range(len(tensor_size)):
+        length *= tensor_size[i]
+    array_tensor = tensor.view(length)
+    if residual is None:
+        residual = torch.zeros(length)
+    array_tensor.add_(residual)
+    residual = torch.zeros(length)
+    threshold = array_tensor.topk(k)[0]
+    indexs = []
+    values = []
+    for i in range(len(array_tensor)):
+        if array_tensor[i] < threshold:
+            residual[i] = array_tensor[i]
+            array_tensor[i] = 0.
+        else:
+            indexs.append(i)
+            values.append(array_tensor[i])
+    sparse_tensor = torch.sparse.FloatTensor(torch.LongTensor([indexs]), torch.FloatTensor(values), array_tensor.size())
+    return sparse_tensor, residual
+
+
+
+
+
+
+
+
+
 def train(layer, logger, args, rad_queue, targets_queue, e, data_size, trainloader):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
@@ -37,7 +73,8 @@ def train(layer, logger, args, rad_queue, targets_queue, e, data_size, trainload
         while True:
             try:
                 grad = grad_queue.get(block=True, timeout=1)
-                grad = torch.from_numpy(grad).cuda(0)
+                grad = grad.to_dense().view([args.batch_size, 128, 16, 16]).cuda(0)
+                #grad = torch.from_numpy(grad).cuda(0)
             except Empty as empty:
                 break
             loss = outputs_queue.get(block=False)
@@ -77,6 +114,7 @@ def train(layer, logger, args, rad_queue, targets_queue, e, data_size, trainload
         correct = 0
         total = 0
         criterion.cuda(1)
+        residual = None
         while True:
             try:
                 rec_val = torch.zeros([args.batch_size, 128, 16, 16])
@@ -92,7 +130,9 @@ def train(layer, logger, args, rad_queue, targets_queue, e, data_size, trainload
             targets = torch.from_numpy(targets).cuda(1)
             loss = criterion(outputs, targets)
             loss.backward()
-            grad_queue.put(rec_val.grad.cpu().numpy())
+            spare_grad, residual = sparse(rec_val.grad.cpu(), 1, residual)
+            grad_queue.put(spare_grad)
+            #grad_queue.put(rec_val.grad.cpu().numpy())
             if batch_idx % 2 == 0:
                 optimizer.step()
                 train_loss += loss.item()

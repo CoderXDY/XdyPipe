@@ -1,4 +1,1 @@
-tianhe
-best_acc: 92.92
-start_epoch: 189
-each_epoch:22s
+
