@@ -3,9 +3,7 @@ import torch.distributed as dist
 from torch import nn as nn
 import argparse
 
-#from torch.multiprocessing import Queue, Event
-from torch.multiprocessing import Event
-from multiprocessing import Queue
+from torch.multiprocessing import Queue, Event
 from multiprocessing.managers import BaseManager as bm
 from multiprocessing.dummy import Process
 from multiprocessing.dummy import Queue as ThreadQueue
@@ -32,7 +30,7 @@ import numpy as np
 
 
 
-def sparse(tensor, k, residual=None):
+def sparse(tensor, k, half=True, residual=None):
     #index_value = [(i, dense_tensor[i]) for i in range(dense_tensor) if dense_tensor[i] > 0]
     #index, value = zip(*index_value)
     length = 1
@@ -54,8 +52,26 @@ def sparse(tensor, k, residual=None):
         else:
             indexs.append(i)
             values.append(array_tensor[i])
-    sparse_tensor = torch.sparse.FloatTensor(torch.LongTensor([indexs]), torch.FloatTensor(values), array_tensor.size())
+    #sparse_tensor = torch.sparse.FloatTensor(torch.LongTensor([indexs]), torch.FloatTensor(values), array_tensor.size())
+    sparse_tensor = torch.cat([torch.FloatTensor(indexs), torch.FloatTensor(values)])
+    if half:
+        sparse_tensor = sparse_tensor.half()
+
     return sparse_tensor, residual
+
+def dense(tensor, shape):
+    if tensor.type() != 'torch.FloatTensor':
+        tensor = tensor.float()
+    half_size = int(len(tensor) / 2)
+    indexs = tensor[: half_size].view(1, half_size).long()
+    values = tensor[half_size: ]
+    length = 1
+    for i in range(len(shape)):
+        length *= shape[i]
+    sparse_tensor = torch.sparse.FloatTensor(indexs, values, torch.Size([length]))
+    return sparse_tensor.to_dense().view(shape)
+
+
 
 
 
@@ -76,7 +92,7 @@ def train(layer, logger, args, rad_queue, targets_queue, e, data_size, trainload
         while True:
             try:
                 grad = grad_queue.get(block=True, timeout=1)
-                grad = grad.to_dense().view([args.batch_size, 128, 16, 16]).cuda(0)
+                grad = dense(grad, [args.batch_size, 128, 16, 16]).cuda(0)
                 #grad = torch.from_numpy(grad).cuda(0)
             except Empty as empty:
                 break
@@ -133,7 +149,7 @@ def train(layer, logger, args, rad_queue, targets_queue, e, data_size, trainload
             targets = torch.from_numpy(targets).cuda(1)
             loss = criterion(outputs, targets)
             loss.backward()
-            spare_grad, residual = sparse(rec_val.grad.cpu(), 1, residual)
+            spare_grad, residual = sparse(rec_val.grad.cpu(), 1, True, residual)
             grad_queue.put(spare_grad)
             #grad_queue.put(rec_val.grad.cpu().numpy())
             if batch_idx % 2 == 0:
