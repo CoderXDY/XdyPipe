@@ -2,7 +2,10 @@ import torch
 import torch.distributed as dist
 from torch import nn as nn
 import argparse
-from torch.multiprocessing import Queue, Event
+
+#from torch.multiprocessing import Queue, Event
+from torch.multiprocessing import Event
+from multiprocessing import Queue
 from multiprocessing.managers import BaseManager as bm
 from multiprocessing.dummy import Process
 from multiprocessing.dummy import Queue as ThreadQueue
