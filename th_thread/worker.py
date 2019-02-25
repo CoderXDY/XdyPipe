@@ -92,6 +92,7 @@ def train(layer, logger, args, rad_queue, targets_queue, e, data_size, trainload
         while True:
             try:
                 grad = grad_queue.get(block=True, timeout=1)
+                grad = torch.from_numpy(grad)
                 grad = dense(grad, [args.batch_size, 128, 16, 16]).cuda(0)
                 #grad = torch.from_numpy(grad).cuda(0)
             except Empty as empty:
@@ -150,7 +151,7 @@ def train(layer, logger, args, rad_queue, targets_queue, e, data_size, trainload
             loss = criterion(outputs, targets)
             loss.backward()
             spare_grad, residual = sparse(rec_val.grad.cpu(), 1, True, residual)
-            grad_queue.put(spare_grad)
+            grad_queue.put(spare_grad.numpy())
             #grad_queue.put(rec_val.grad.cpu().numpy())
             if batch_idx % 2 == 0:
                 optimizer.step()
