@@ -52,12 +52,39 @@ def sparse(tensor, k, half=True, residual=None):
         else:
             indexs.append(i)
             values.append(array_tensor[i])
-    #sparse_tensor = torch.sparse.FloatTensor(torch.LongTensor([indexs]), torch.FloatTensor(values), array_tensor.size())
     sparse_tensor = torch.cat([torch.FloatTensor(indexs), torch.FloatTensor(values)])
     if half:
         sparse_tensor = sparse_tensor.half()
 
     return sparse_tensor, residual
+
+
+
+def sparse2(tensor, k, half=True, residual=None):
+
+    array_tensor = tensor.view(-1)
+    if residual is None:
+        residual = torch.zeros(array_tensor.size())
+    array_tensor.add_(residual)
+    threshold = array_tensor.topk(int(array_tensor.nelement()*k) if int(array_tensor.nelement()*k) != 0 else 1)[0]
+    residual = torch.where(abs(array_tensor) < threshold, array_tensor, torch.zeros(array_tensor.size()))
+    array_tensor[abs(array_tensor) < threshold] = 0.
+    indexs = array_tensor.nonzero().t()
+    values = array_tensor[indexs[0]]
+    sparse_tensor = torch.cat([indexs[0].float(), values])
+    if half:
+        sparse_tensor = sparse_tensor.half()
+
+    return sparse_tensor, residual
+
+
+
+
+
+
+
+
+
 
 def dense(tensor, shape):
     if tensor.type() != 'torch.FloatTensor':
@@ -82,6 +109,7 @@ def dense(tensor, shape):
 
 
 def train(layer, logger, args, rad_queue, targets_queue, e, data_size, trainloader):
+
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     optimizer.zero_grad()
@@ -94,8 +122,9 @@ def train(layer, logger, args, rad_queue, targets_queue, e, data_size, trainload
                 grad = grad_queue.get(block=True, timeout=1)
                 grad = torch.from_numpy(grad)
                 grad = dense(grad, [args.batch_size, 128, 16, 16]).cuda(0)
-                #grad = torch.from_numpy(grad).cuda(0)
+                #grad = torch.from_numpy(grad).cuda(0).float()
             except Empty as empty:
+                print("backward empty.....")
                 break
             loss = outputs_queue.get(block=False)
             loss.backward(grad)
@@ -150,9 +179,9 @@ def train(layer, logger, args, rad_queue, targets_queue, e, data_size, trainload
             targets = torch.from_numpy(targets).cuda(1)
             loss = criterion(outputs, targets)
             loss.backward()
-            spare_grad, residual = sparse(rec_val.grad.cpu(), 1, True, residual)
+            spare_grad, residual = sparse2(rec_val.grad.cpu(), 1, True, residual)
             grad_queue.put(spare_grad.numpy())
-            #grad_queue.put(rec_val.grad.cpu().numpy())
+            #grad_queue.put(rec_val.grad.cpu().half().numpy())
             if batch_idx % 2 == 0:
                 optimizer.step()
                 train_loss += loss.item()
