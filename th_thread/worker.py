@@ -66,7 +66,7 @@ def sparse2(tensor, k, half=True, residual=None):
     if residual is None:
         residual = torch.zeros(array_tensor.size())
     array_tensor.add_(residual)
-    threshold = array_tensor.topk(int(array_tensor.nelement()*k) if int(array_tensor.nelement()*k) != 0 else 1)[0]
+    threshold = array_tensor.topk(int(array_tensor.nelement()*k) if int(array_tensor.nelement()*k) != 0 else 1)[0][-1]
     residual = torch.where(abs(array_tensor) < threshold, array_tensor, torch.zeros(array_tensor.size()))
     array_tensor[abs(array_tensor) < threshold] = 0.
     indexs = array_tensor.nonzero().t()
@@ -100,6 +100,67 @@ def dense(tensor, shape):
 
 
 
+def model_par_train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloader):
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
+    layer.train()
+
+    if dist.get_rank() == 0:
+        criterion.cuda(0)
+        for batch_idx, (inputs, targets) in enumerate(trainloader):
+            print("batch: " + str(batch_idx))
+            inputs, targets = inputs.cuda(0), targets
+            optimizer.zero_grad()
+            outputs = layer(inputs)
+            print('put......')
+            targets_queue.put(targets.numpy())
+            print(outputs.cpu().size())
+            dist.send(tensor=outputs.cpu(), dst=1)
+            print("send....")
+            grad = torch.zeros([args.batch_size, 128, 16, 16])
+            dist.recv(tensor=grad, src=1)
+            outputs.backward(grad.cuda(0))
+            optimizer.step()
+
+        send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
+        send_opt.wait()
+        e.set()
+    elif dist.get_rank() == 1:
+        batch_idx = 0
+        train_loss = 0
+        correct = 0
+        total = 0
+        criterion.cuda(1)
+        while True:
+            try:
+                rec_val = torch.zeros([args.batch_size, 128, 16, 16])
+                dist.recv(tensor=rec_val, src=0)
+                print("recv.......")
+            except RuntimeError as error:
+                e.wait()
+                break
+            rec_val = rec_val.cuda(1)
+            rec_val.requires_grad_()
+            optimizer.zero_grad()
+            outputs = layer(rec_val)
+            targets = targets_queue.get(block=True, timeout=2)
+            targets = torch.from_numpy(targets).cuda(1)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item()
+            _, predicted = outputs.max(1)
+            total += targets.size(0)
+            correct += predicted.eq(targets).sum().item()
+            progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                         % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+            send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=0)
+            send_opt.wait()
+            if batch_idx % 10 == 0:
+                logger.error("train:" + str(train_loss / (batch_idx + 1)))
+
+            batch_idx += 1
 
 
 
@@ -108,7 +169,7 @@ def dense(tensor, shape):
 
 
 
-def train(layer, logger, args, rad_queue, targets_queue, e, data_size, trainloader):
+def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloader):
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
@@ -264,6 +325,7 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
     for epoch in range(start_epoch, start_epoch + epoch_num):
         print('Training epoch: %d' % epoch)
         train(layer, logger, args, grad_queue, targets_queue, epoch_event, train_size, trainloader)
+        #model_par_train(layer, logger, args, grad_queue, targets_queue, epoch_event, train_size, trainloader)
         epoch_event.clear()
         print('Eval epoch: %d' % epoch)
         eval(layer, logger, args, targets_queue, epoch_event, save_event, test_size, testloader)
