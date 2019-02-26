@@ -64,10 +64,10 @@ def sparse2(tensor, k, half=True, residual=None):
 
     array_tensor = tensor.view(-1)
     if residual is None:
-        residual = torch.zeros(array_tensor.size())
+        residual = torch.zeros(array_tensor.size(), device=torch.device('cuda:1'))
     array_tensor.add_(residual)
     threshold = array_tensor.topk(int(array_tensor.nelement()*k) if int(array_tensor.nelement()*k) != 0 else 1)[0][-1]
-    residual = torch.where(abs(array_tensor) < threshold, array_tensor, torch.zeros(array_tensor.size()))
+    residual = torch.where(abs(array_tensor) < threshold, array_tensor, torch.zeros(array_tensor.size(), device=torch.device('cuda:1')))
     array_tensor[abs(array_tensor) < threshold] = 0.
     indexs = array_tensor.nonzero().t()
     values = array_tensor[indexs[0]]
@@ -240,8 +240,8 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             targets = torch.from_numpy(targets).cuda(1)
             loss = criterion(outputs, targets)
             loss.backward()
-            spare_grad, residual = sparse2(rec_val.grad.cpu(), 1, True, residual)
-            grad_queue.put(spare_grad.numpy())
+            spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
+            grad_queue.put(spare_grad.cpu().numpy())
             #grad_queue.put(rec_val.grad.cpu().half().numpy())
             if batch_idx % 2 == 0:
                 optimizer.step()
