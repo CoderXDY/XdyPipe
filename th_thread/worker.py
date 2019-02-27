@@ -91,7 +91,7 @@ def dense(tensor, shape):
         tensor = tensor.float()
     half_size = int(len(tensor) / 2)
     indexs = tensor[: half_size].view(1, half_size).long()
-    values = tensor[half_size: ]
+    values = tensor[half_size:]
     length = 1
     for i in range(len(shape)):
         length *= shape[i]
