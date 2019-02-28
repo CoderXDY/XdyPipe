@@ -450,6 +450,7 @@ if __name__ == "__main__":
     bm.register('get_grad_queue')
     bm.register('get_targets_queue')
     bm.register('get_save_event')
+    bm.register('get_backward_event')
     m = bm(address=(args.ip, 5000), authkey=b'xpipe')
     m.connect()
     global_event = m.get_global_event()
@@ -458,7 +459,6 @@ if __name__ == "__main__":
     targets_queue = m.get_targets_queue()
     save_event = m.get_save_event()
     if args.mode != 0:
-        bm.register('get_backward_event')
         backward_event = m.get_backward_event()
 
     if args.layer_type == 0:
