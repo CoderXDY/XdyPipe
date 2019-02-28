@@ -233,7 +233,8 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
             correct += predicted.eq(targets).sum().item()
             progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-            backward_event.set()
+            if not backward_event.is_set():
+                backward_event.set()
             send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=0)
             send_opt.wait()
             if batch_idx % 10 == 0:

@@ -54,7 +54,7 @@ if __name__ == "__main__":
     bm.register('get_grad_queue', callable=lambda: grad_queue)
     bm.register('get_targets_queue', callable=lambda: targets_queue)
     bm.register('get_save_event', callable=lambda: save_event)
-    bm.register('get_backward_event', callable=lambda: get_backward_event)
+    bm.register('get_backward_event', callable=lambda: backward_event)
     m = bm(address=(args.ip, 5000), authkey=b'xpipe')
     m.start()
     g_e = m.get_global_event()
