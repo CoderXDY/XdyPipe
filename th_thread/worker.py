@@ -208,15 +208,15 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
                 send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
                 send_opt.wait()
                 while output_queue.qsize() > 0:
-                    backward_event.wait()
+                    #backward_event.wait()
                     optimizer.zero_grad()
                     grad = torch.zeros([args.batch_size, 128, 16, 16])
                     dist.recv(tensor=grad, src=1)
                     outputs = output_queue.get()
                     outputs.backward(grad.cuda(0))
                     optimizer.step()
-                    backward_event.clear()
-                e.set()
+                    #backward_event.clear()
+                break
     elif dist.get_rank() == 1:
         batch_idx = 0
         train_loss = 0
@@ -231,7 +231,7 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
                 print("recv.......")
             except RuntimeError as error:
                 print("runtime........................")
-                e.wait()
+                #e.wait()
                 break
             rec_val = rec_val.cuda(1)
             rec_val.requires_grad_()
@@ -252,7 +252,6 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
                 print("set.....")
                 backward_event.set()
             send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=0)
-            send_opt.wait()
             print("send.....")
             if batch_idx % 10 == 0:
                 logger.error("train:" + str(train_loss / (batch_idx + 1)))
