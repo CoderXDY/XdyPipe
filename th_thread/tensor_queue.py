@@ -40,7 +40,6 @@ def get_tensor_queue(size, shape, cuda_id):
 
 
 def put_tensor(queue, atom, tensor, timeout):
-    print('put:' + str(atom['write_point'].value))
     endtime = time.time() + timeout
     while  (atom['write_point'].value + 1) % len(queue) == atom['read_point'].value:
         remaining = endtime - time.time()
@@ -58,7 +57,6 @@ def put_tensor(queue, atom, tensor, timeout):
 
 
 def get_tensor(queue, atom, timeout):
-    print('get:' + str(atom['read_point'].value))
     length = len(queue)
     endtime = time.time() + timeout
     while atom['write_point'].value == atom['read_point'].value:
@@ -68,7 +66,6 @@ def get_tensor(queue, atom, timeout):
         print('get_wait....')
         atom['read_signal'].wait(remaining)
     val = atom['read_point'].value
-    print('val:' + str(val))
     if val + 1 == length:
         atom['read_point'].value = (val + 1) % length
         result = queue[length - 1]
