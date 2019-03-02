@@ -29,7 +29,7 @@ import numpy as np
 
 def get_tensor_queue(size, shape, cuda_id):
     return {'read_point': Value('i', 0), 'write_point': Value('i', 0), 'read_signal': Event(), 'write_signal': Event()}, \
-           [torch.zeros(shape).cuda(cuda_id).share_memeory_() for i in range(size)]
+           [torch.zeros(shape).cuda(cuda_id).share_memory_() for i in range(size)]
 
 
 
@@ -39,9 +39,15 @@ def get_tensor_queue(size, shape, cuda_id):
 
 
 
-def put_tensor(queue, atom, tensor):
-    if (atom['write_point'].value + 1) % len(queue) == atom['read_point'].value:
-        atom['write_signal'].wait()
+def put_tensor(queue, atom, tensor, timeout):
+    print('put:' + str(atom['write_point'].value))
+    endtime = time.time() + timeout
+    while  (atom['write_point'].value + 1) % len(queue) == atom['read_point'].value:
+        remaining = endtime - time.time()
+        if remaining <= 0.0:
+            raise Full
+        print('put wait.....')
+        atom['write_signal'].wait(remaining)
     queue[atom['write_point'].value].copy_(tensor)
     val = atom['write_point'].value
     atom['write_point'].value = (val + 1) % len(queue)
@@ -51,29 +57,42 @@ def put_tensor(queue, atom, tensor):
 
 
 
-def get_tensor(queue, atom):
+def get_tensor(queue, atom, timeout):
+    print('get:' + str(atom['read_point'].value))
     length = len(queue)
-    if atom['write_point'].value == atom['read_point'].value:
-        atom['read_signal'].wait()
+    endtime = time.time() + timeout
+    while atom['write_point'].value == atom['read_point'].value:
+        remaining = endtime - time.time()
+        if remaining <= 0.0:
+            raise Empty
+        print('get_wait....')
+        atom['read_signal'].wait(remaining)
     val = atom['read_point'].value
+    print('val:' + str(val))
     if val + 1 == length:
         atom['read_point'].value = (val + 1) % length
-        return queue[length - 1]
-    atom['read_point'].value = val + 1
-    return queue[atom['read_point'].value - 1]
+        result = queue[length - 1]
+    else:
+        atom['read_point'].value = val + 1
+        result = queue[atom['read_point'].value - 1]
     atom['read_signal'].clear()
     atom['write_signal'].set()
+    return result
+
+
 
 
 def read(queue, atom):
     while True:
-        x = get_tensor(queue, atom)
+        x = get_tensor(queue, atom, 3)
+        print("===================")
         print(x)
-def write(queue, atom):
-    for i  in range(8):
-        x = torch.FloatTensor([i])
-        put_tensor(queue, atom, x)
         time.sleep(1)
+def write(queue, atom):
+    for i  in range(1, 20):
+        x = torch.FloatTensor([i])
+        put_tensor(queue, atom, x, 3)
+        time.sleep(5)
 
 
 if __name__ == "__main__":

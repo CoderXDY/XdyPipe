@@ -23,6 +23,7 @@ import psutil
 import gc
 import torch.backends.cudnn as cudnn
 import numpy as np
+from tensor_queue import get_tensor_queue, get_tensor, put_tensor
 """
  pipeline ResNet script for Tianhe-2  with gpu cluster
 
@@ -259,25 +260,28 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
             batch_idx += 1
 
 
-def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloader):
-
+def train(layer, logger, args, targets_queue, e, data_size, trainloader):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     optimizer.zero_grad()
     layer.train()
 
-    def backward():
+    def backward(atom, outputs_queue, args):
+        world_size = args.size() * 2 - 1
+        dist.init_process_group(backend='tcp', init_method=args.path, world_size=world_size, rank=2)
         batch_idx = 0
         while True:
             try:
-                grad = grad_queue.get(block=True, timeout=1)
-                grad = torch.from_numpy(grad)
-                grad = dense(grad, [args.batch_size, 128, 16, 16]).cuda(0)
-                #grad = torch.from_numpy(grad).cuda(0).float()
+                grad = torch.zeros([args.batch_size, 128, 16, 16])
+                dist.recv(tensor=grad, dst=1)
+                #grad = grad_queue.get(block=True, timeout=1)
+                #grad = torch.from_numpy(grad)
+                #grad = dense(grad, [args.batch_size, 128, 16, 16]).cuda(0)
+                grad = grad.cuda(0).float()
             except Empty as empty:
                 print("backward empty.....")
                 break
-            loss = outputs_queue.get(block=False)
+            loss = get_tensor(outputs_queue, atom, 1)
             loss.backward(grad)
             if batch_idx % 2 == 0:
                 optimizer.step()
@@ -285,30 +289,34 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             batch_idx += 1
 
 
-    if dist.get_rank() == 0:
+    if args.rank == 0:
+
+        dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size * 2 - 1, rank=args.rank)
+
+        atom, outputs_queue = get_tensor_queue(4, [args.batch_size, 128, 16, 16], 0)
+        backward_process = Process(target=backward, args=(atom, outputs_queue, args))
+        backward_process.start()
+
         criterion.cuda(0)
-        start_flag = True
-        outputs_queue = ThreadQueue(4)
+
         for batch_idx, (inputs, targets) in enumerate(trainloader):
             print("batch: " + str(batch_idx))
             inputs, targets = inputs.cuda(0), targets
             outputs = layer(inputs)
-            outputs_queue.put(outputs)
+            put_tensor(outputs_queue, atom, outputs, 4)
             print('put......')
             targets_queue.put(targets.numpy())
             print(outputs.cpu().size())
             send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
             send_opt.wait()
             print("send....")
-            if start_flag and grad_queue.qsize() > 0:
-                start_flag = False
-                back_process = Process(target=backward)
-                back_process.start()
+
         send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
         send_opt.wait()
-        back_process.join()
+        backward_process.join()
         e.set()
-    elif dist.get_rank() == 1:
+    elif args.rank == 1:
+        dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size * 2 - 1, rank=args.rank)
         batch_idx = 0
         train_loss = 0
         correct = 0
@@ -330,8 +338,9 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             targets = torch.from_numpy(targets).cuda(1)
             loss = criterion(outputs, targets)
             loss.backward()
-            spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
-            grad_queue.put(spare_grad.cpu().numpy())
+            send_opt = dist.isend(rec_val.grad.cpu.half(), src=2)
+            #spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
+            #grad_queue.put(spare_grad.cpu().numpy())
             #grad_queue.put(rec_val.grad.cpu().half().numpy())
             if batch_idx % 2 == 0:
                 optimizer.step()
@@ -351,6 +360,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             batch_idx += 1
 
 def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
+    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
     criterion = nn.CrossEntropyLoss()
     criterion.cuda()
     layer.eval()
@@ -403,20 +413,20 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
 
 
 def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, backward_event=None):
-    logger = logging.getLogger('rank-' + str(dist.get_rank()))
-    file_handler = logging.FileHandler('rank-' + str(dist.get_rank()) + '.log')
+    logger = logging.getLogger('rank-' + str(args.rank))
+    file_handler = logging.FileHandler('rank-' + str(args.rank) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
     epoch_num = 200
     global best_acc
-    r = dist.get_rank()
+    r = args.rank
     for epoch in range(start_epoch, start_epoch + epoch_num):
         print('Training epoch: %d' % epoch)
-        #train(layer, logger, args, grad_queue, targets_queue, epoch_event, train_size, trainloader)
+        train(layer, logger, args, targets_queue, epoch_event, train_size, trainloader)
         #model_par_train(layer, logger, args, grad_queue, targets_queue, epoch_event, train_size, trainloader)
-        pipe_dream(layer, logger, args, backward_event, targets_queue, epoch_event, train_size, trainloader)
+        #pipe_dream(layer, logger, args, backward_event, targets_queue, epoch_event, train_size, trainloader)
         epoch_event.clear()
         print('Eval epoch: %d' % epoch)
         eval(layer, logger, args, targets_queue, epoch_event, save_event, test_size, testloader)
@@ -484,7 +494,7 @@ if __name__ == "__main__":
         layer = THResNetGroup1()
         layer.cuda(1)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    #layer.share_memory()
+    layer.share_memory()
     cudnn.benchmark = True
 
     best_acc = 0.0
@@ -500,7 +510,7 @@ if __name__ == "__main__":
         print("start_epoch: " + str(start_epoch))
 
     print("init process-" + str(args.rank) + "....")
-    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
+
 
     if True:
         transform_train = transforms.Compose([
