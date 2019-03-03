@@ -259,41 +259,42 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
             batch_idx += 1
 
 
+
+
+
+def backward(layer, atom, outputs_queue, args):
+    optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
+    optimizer.zero_grad()
+    dist.init_process_group(backend='tcp', init_method=args.path, world_size=3, rank=2)
+    batch_idx = 0
+    while True:
+        try:
+            grad = torch.zeros([args.batch_size, 128, 16, 16]).half()
+            dist.recv(tensor=grad, src=1)
+                #grad = grad_queue.get(block=True, timeout=1)
+                #grad = torch.from_numpy(grad)
+                #grad = dense(grad, [args.batch_size, 128, 16, 16]).cuda(0)
+            grad = grad.cuda(0).float()
+        except Empty as empty:
+            print("backward empty.....")
+            break
+        loss = get_tensor(outputs_queue, atom, 1)
+        loss.backward(grad)
+        if batch_idx % 2 == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+        batch_idx += 1
 def train(layer, logger, args, targets_queue, e, data_size, trainloader):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     optimizer.zero_grad()
     layer.train()
-
-    def backward(atom, outputs_queue, args):
-
-        dist.init_process_group(backend='tcp', init_method=args.path, world_size=3, rank=2)
-        batch_idx = 0
-        while True:
-            try:
-                grad = torch.zeros([args.batch_size, 128, 16, 16]).half()
-                dist.recv(tensor=grad, src=1)
-                #grad = grad_queue.get(block=True, timeout=1)
-                #grad = torch.from_numpy(grad)
-                #grad = dense(grad, [args.batch_size, 128, 16, 16]).cuda(0)
-                grad = grad.cuda(0).float()
-            except Empty as empty:
-                print("backward empty.....")
-                break
-            loss = get_tensor(outputs_queue, atom, 1)
-            loss.backward(grad)
-            if batch_idx % 2 == 0:
-                optimizer.step()
-                optimizer.zero_grad()
-            batch_idx += 1
-
-
     if args.rank == 0:
 
 
 
         atom, outputs_queue = get_tensor_queue(4, [args.batch_size, 128, 16, 16], 0)
-        backward_process = Process(target=backward, args=(atom, outputs_queue, args))
+        backward_process = Process(target=backward, args=(layer, atom, outputs_queue, args))
         backward_process.start()
         dist.init_process_group(backend='tcp', init_method=args.path, world_size=3, rank=args.rank)
         criterion.cuda(0)
