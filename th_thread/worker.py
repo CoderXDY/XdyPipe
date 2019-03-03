@@ -271,9 +271,9 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
         while True:
             try:
                 grad = grad_queue.get(block=True, timeout=1)
-                grad = torch.from_numpy(grad)
-                grad = dense(grad, [args.batch_size, 128, 16, 16]).cuda(0)
-                #grad = torch.from_numpy(grad).cuda(0).float()
+                #grad = torch.from_numpy(grad)
+                #grad = dense(grad, [args.batch_size, 128, 16, 16]).cuda(0)
+                grad = torch.from_numpy(grad).cuda(0).float()
             except Empty as empty:
                 print("backward empty.....")
                 break
@@ -288,7 +288,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
     if dist.get_rank() == 0:
         criterion.cuda(0)
         start_flag = True
-        outputs_queue = ThreadQueue(4)
+        outputs_queue = ThreadQueue(20)
         for batch_idx, (inputs, targets) in enumerate(trainloader):
             print("batch: " + str(batch_idx))
             inputs, targets = inputs.cuda(0), targets
@@ -298,7 +298,9 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             targets_queue.put(targets.numpy())
             print(outputs.cpu().size())
             send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
-            send_opt.wait()
+            if batch_idx % 10 == 0:
+                send_opt.wait()
+            #send_opt.wait()
             print("send....")
             if start_flag and grad_queue.qsize() > 0:
                 start_flag = False
@@ -330,9 +332,9 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             targets = torch.from_numpy(targets).cuda(1)
             loss = criterion(outputs, targets)
             loss.backward()
-            spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
-            grad_queue.put(spare_grad.cpu().numpy())
-            #grad_queue.put(rec_val.grad.cpu().half().numpy())
+            #spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
+            #grad_queue.put(spare_grad.cpu().numpy())
+            grad_queue.put(rec_val.grad.cpu().half().numpy())
             if batch_idx % 2 == 0:
                 optimizer.step()
                 train_loss += loss.item()
@@ -414,9 +416,9 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
     r = dist.get_rank()
     for epoch in range(start_epoch, start_epoch + epoch_num):
         print('Training epoch: %d' % epoch)
-        #train(layer, logger, args, grad_queue, targets_queue, epoch_event, train_size, trainloader)
+        train(layer, logger, args, grad_queue, targets_queue, epoch_event, train_size, trainloader)
         #model_par_train(layer, logger, args, grad_queue, targets_queue, epoch_event, train_size, trainloader)
-        pipe_dream(layer, logger, args, backward_event, targets_queue, epoch_event, train_size, trainloader)
+        #pipe_dream(layer, logger, args, backward_event, targets_queue, epoch_event, train_size, trainloader)
         epoch_event.clear()
         print('Eval epoch: %d' % epoch)
         eval(layer, logger, args, targets_queue, epoch_event, save_event, test_size, testloader)
