@@ -8,7 +8,7 @@ from multiprocessing.managers import BaseManager as bm
 from multiprocessing.dummy import Queue as ThreadQueue
 import torch.nn.functional as F
 import torch.optim as optim
-import multiprocessing
+#import multiprocessing
 import logging
 import time
 from res import THResNetGroup0, THResNetGroup1
@@ -447,7 +447,7 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
 
 if __name__ == "__main__":
 
-    #torch.multiprocessing.set_start_method("spawn")
+    torch.multiprocessing.set_start_method("spawn")
     parser = argparse.ArgumentParser()
     parser.add_argument('-ip', help='the ip of master',default='89.72.2.41')
     parser.add_argument('-size', type=int, help='input the sum of node', default=2)
