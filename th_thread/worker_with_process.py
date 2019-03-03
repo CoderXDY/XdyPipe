@@ -3,9 +3,8 @@ import torch.distributed as dist
 from torch import nn as nn
 import argparse
 
-from torch.multiprocessing import Queue, Event
+from torch.multiprocessing import Queue, Event, Process
 from multiprocessing.managers import BaseManager as bm
-from multiprocessing.dummy import Process
 from multiprocessing.dummy import Queue as ThreadQueue
 import torch.nn.functional as F
 import torch.optim as optim
@@ -267,13 +266,13 @@ def train(layer, logger, args, targets_queue, e, data_size, trainloader):
     layer.train()
 
     def backward(atom, outputs_queue, args):
-        world_size = args.size() * 2 - 1
-        dist.init_process_group(backend='tcp', init_method=args.path, world_size=world_size, rank=2)
+
+        dist.init_process_group(backend='tcp', init_method=args.path, world_size=3, rank=2)
         batch_idx = 0
         while True:
             try:
-                grad = torch.zeros([args.batch_size, 128, 16, 16])
-                dist.recv(tensor=grad, dst=1)
+                grad = torch.zeros([args.batch_size, 128, 16, 16]).half()
+                dist.recv(tensor=grad, src=1)
                 #grad = grad_queue.get(block=True, timeout=1)
                 #grad = torch.from_numpy(grad)
                 #grad = dense(grad, [args.batch_size, 128, 16, 16]).cuda(0)
@@ -291,12 +290,12 @@ def train(layer, logger, args, targets_queue, e, data_size, trainloader):
 
     if args.rank == 0:
 
-        dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size * 2 - 1, rank=args.rank)
+
 
         atom, outputs_queue = get_tensor_queue(4, [args.batch_size, 128, 16, 16], 0)
         backward_process = Process(target=backward, args=(atom, outputs_queue, args))
         backward_process.start()
-
+        dist.init_process_group(backend='tcp', init_method=args.path, world_size=3, rank=args.rank)
         criterion.cuda(0)
 
         for batch_idx, (inputs, targets) in enumerate(trainloader):
@@ -316,7 +315,7 @@ def train(layer, logger, args, targets_queue, e, data_size, trainloader):
         backward_process.join()
         e.set()
     elif args.rank == 1:
-        dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size * 2 - 1, rank=args.rank)
+        dist.init_process_group(backend='tcp', init_method=args.path, world_size=3, rank=args.rank)
         batch_idx = 0
         train_loss = 0
         correct = 0
@@ -338,7 +337,7 @@ def train(layer, logger, args, targets_queue, e, data_size, trainloader):
             targets = torch.from_numpy(targets).cuda(1)
             loss = criterion(outputs, targets)
             loss.backward()
-            send_opt = dist.isend(rec_val.grad.cpu().half(), src=2)
+            send_opt = dist.isend(rec_val.grad.cpu().half(), dst=2)
             #spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
             #grad_queue.put(spare_grad.cpu().numpy())
             #grad_queue.put(rec_val.grad.cpu().half().numpy())
@@ -448,6 +447,7 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
 
 if __name__ == "__main__":
 
+    #torch.multiprocessing.set_start_method("spawn")
     parser = argparse.ArgumentParser()
     parser.add_argument('-ip', help='the ip of master',default='89.72.2.41')
     parser.add_argument('-size', type=int, help='input the sum of node', default=2)
@@ -469,6 +469,8 @@ if __name__ == "__main__":
     print("data_worker: " + str(args.data_worker))
 
     #torch.manual_seed(1)
+
+
 
     bm.register('get_epoch_event')
     bm.register('get_global_event')
@@ -493,6 +495,7 @@ if __name__ == "__main__":
     elif args.layer_type == 1:
         layer = THResNetGroup1()
         layer.cuda(1)
+
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     layer.share_memory()
     cudnn.benchmark = True
@@ -540,6 +543,6 @@ if __name__ == "__main__":
         trainloader = None
         testloader = None
 
-    
+
     run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, backward_event)
 
