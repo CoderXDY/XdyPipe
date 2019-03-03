@@ -10,7 +10,7 @@ else:
     import pickle
 
 import torch.utils.data as data
-from vision_utils import download_url, check_integrity
+#from vision_utils import download_url, check_integrity
 
 
 class CIFAR10(data.Dataset):
