@@ -265,7 +265,7 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
 def backward(layer, atom, outputs_queue, args):
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     optimizer.zero_grad()
-    dist.init_process_group(backend='tcp', init_method=args.path, world_size=3, rank=2)
+    dist.init_process_group(backend='gloo', init_method=args.path, world_size=3, rank=2)
     batch_idx = 0
     while True:
         try:
@@ -296,7 +296,7 @@ def train(layer, logger, args, targets_queue, e, data_size, trainloader):
         atom, outputs_queue = get_tensor_queue(4, [args.batch_size, 128, 16, 16], 0)
         backward_process = Process(target=backward, args=(layer, atom, outputs_queue, args))
         backward_process.start()
-        dist.init_process_group(backend='tcp', init_method=args.path, world_size=3, rank=args.rank)
+        dist.init_process_group(backend='gloo', init_method=args.path, world_size=3, rank=args.rank)
         criterion.cuda(0)
 
         for batch_idx, (inputs, targets) in enumerate(trainloader):
@@ -316,7 +316,7 @@ def train(layer, logger, args, targets_queue, e, data_size, trainloader):
         backward_process.join()
         e.set()
     elif args.rank == 1:
-        dist.init_process_group(backend='tcp', init_method=args.path, world_size=3, rank=args.rank)
+        dist.init_process_group(backend='gloo', init_method=args.path, world_size=3, rank=args.rank)
         batch_idx = 0
         train_loss = 0
         correct = 0

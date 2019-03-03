@@ -24,7 +24,7 @@ def train(rank, model):
 
 
 if __name__ == "__main__":
-    torch.manual_seed(args.seed)
+    torch.manual_seed(1)
     mp.set_start_method('spawn')
 
     model = Layer(10, 2).to(torch.device('cuda:0'))
