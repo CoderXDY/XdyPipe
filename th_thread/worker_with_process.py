@@ -12,7 +12,8 @@ import torch.optim as optim
 import logging
 import time
 from res import THResNetGroup0, THResNetGroup1
-import torchvision
+#import torchvision
+import vision_cifar as cifar
 import torchvision.transforms as transforms
 from utils import progress_bar
 import traceback
@@ -524,7 +525,7 @@ if __name__ == "__main__":
         ])
 
         trainset = torchvision.datasets.CIFAR10(root='../data', train=True, download=False, transform=transform_train)
-
+        trainset = cifar(root='../data', train=True, download=False, transform=transform_train)
         # pin memory
         trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True,
                                                   num_workers=args.data_worker, drop_last=True)
@@ -534,7 +535,7 @@ if __name__ == "__main__":
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
 
-        testset = torchvision.datasets.CIFAR10(root='../data', train=False, download=False, transform=transform_test)
+        testset = cifar(root='../data', train=False, download=False, transform=transform_test)
         testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False,
                                                  num_workers=args.data_worker, drop_last=True)
         train_size = len(trainloader)
