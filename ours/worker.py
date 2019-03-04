@@ -12,7 +12,7 @@ import torch.optim as optim
 import multiprocessing
 import logging
 import time
-from res import THResNetGroup0, THResNetGroup1
+from ours.model.res import THResNetGroup0, THResNetGroup1
 import torchvision
 import torchvision.transforms as transforms
 from utils import progress_bar
@@ -335,7 +335,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             #spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
             #grad_queue.put(spare_grad.cpu().numpy())
             grad_queue.put(rec_val.grad.cpu().half().numpy())
-            if batch_idx % 2 == 0:
+            if batch_idx % 10 == 0:
                 optimizer.step()
                 train_loss += loss.item()
                 _, predicted = outputs.max(1)
