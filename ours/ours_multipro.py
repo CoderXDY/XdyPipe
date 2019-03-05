@@ -97,7 +97,7 @@ def dense(tensor, shape):
     return sparse_tensor.to_dense().view(shape)
 
 
-def backward(layer, queue, args, optimizer):
+def backward(layer, queue, args, optimizer, start_event):
     dist.init_process_group(backend='gloo', init_method=args.path, world_size=args.size, rank=2)
     start_event.wait()
     batch_idx = 0
