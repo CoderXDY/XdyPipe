@@ -98,7 +98,7 @@ def dense(tensor, shape):
 
 
 def backward(layer, queue, args, optimizer):
-    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=2)
+    dist.init_process_group(backend='gloo', init_method=args.path, world_size=args.size, rank=2)
     start_event.wait()
     batch_idx = 0
     while True:
@@ -117,7 +117,7 @@ def backward(layer, queue, args, optimizer):
             print("backward empty.....")
             break
         inputs = queue.get(block=False)
-        outputs = layer(inputs)
+        outputs = layer(torch.from_numpy(inputs).cuda(0))
         outputs.backward(grad)
         if batch_idx % args.buffer_size == 0:
             optimizer.step()
@@ -134,14 +134,14 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
     layer.train()
     if args.rank == 0:
         q = Queue(10)
-        back_process = Process(target=backward, args=(layer, q, args, optimizer))
+        back_process = Process(target=backward, args=(layer, q, args, optimizer, start_event))
         back_process.start()
-        dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
+        dist.init_process_group(backend='gloo', init_method=args.path, world_size=args.size, rank=args.rank)
         criterion.cuda(0)
 
         for batch_idx, (inputs, targets) in enumerate(trainloader):
             print("batch: " + str(batch_idx))
-            with torch.no_grad:
+            with torch.no_grad():
                 outputs = layer(inputs.cuda(0))
             send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
             send_opt.wait()
@@ -159,7 +159,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
         total = 0
         criterion.cuda(1)
         residual = None
-        dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
+        dist.init_process_group(backend='gloo', init_method=args.path, world_size=args.size, rank=args.rank)
         while True:
             try:
                 print('before recv.......')
@@ -167,7 +167,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
                 dist.recv(tensor=rec_val, src=0)
                 print("recv.......")
             except RuntimeError as error:
-                send_opt = dist.isend(tensor=torch.zeros(0), dst=0)
+                send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
                 send_opt.wait()
                 e.wait()
                 break
@@ -197,11 +197,12 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             if batch_idx % 10 == 0:
                 logger.error("train:" + str(train_loss / (batch_idx + 1)))
 
-            send_opt = dist.isend(tensor=rec_val.grad.cpu().half(), dst=0)
+            send_opt = dist.isend(tensor=rec_val.grad.cpu().half(), dst=2)
             send_opt.wait()
             batch_idx += 1
 
 def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
+    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
     criterion = nn.CrossEntropyLoss()
     criterion.cuda()
     layer.eval()
