@@ -3,10 +3,8 @@ import torch.distributed as dist
 from torch import nn as nn
 import argparse
 
-from torch.multiprocessing import Queue, Event
+from torch.multiprocessing import Queue, Event, Process
 from multiprocessing.managers import BaseManager as bm
-from multiprocessing.dummy import Process
-from multiprocessing.dummy import Queue as ThreadQueue
 import torch.nn.functional as F
 import torch.optim as optim
 import logging
@@ -99,7 +97,32 @@ def dense(tensor, shape):
     return sparse_tensor.to_dense().view(shape)
 
 
-
+def backward(layer, queue, args, optimizer):
+    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=2)
+    start_event.wait()
+    batch_idx = 0
+    while True:
+        print('backward running')
+        try:
+            print('before grad get')
+                #grad = grad_queue.get(block=True, timeout=1)
+                #grad = torch.from_numpy(grad)
+                #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
+                #grad = torch.from_numpy(grad).cuda(0).float()
+            grad = torch.zeros([args.batch_size, 256, 4, 4]).half()
+            dist.recv(tensor=grad, src=1)
+            grad = grad.cuda(0).float()
+            print('after grad get')
+        except RuntimeError as runtime:
+            print("backward empty.....")
+            break
+        inputs = queue.get(block=False)
+        outputs = layer(inputs)
+        outputs.backward(grad)
+        if batch_idx % args.buffer_size == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+        batch_idx += 1
 
 
 
@@ -109,60 +132,34 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     optimizer.zero_grad()
     layer.train()
-
-    def backward():
-        start_event.wait()
-        batch_idx = 0
-        while True:
-            print('backward running')
-            try:
-                print('before grad get')
-                #grad = grad_queue.get(block=True, timeout=1)
-                #grad = torch.from_numpy(grad)
-                #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
-                #grad = torch.from_numpy(grad).cuda(0).float()
-                grad = torch.zeros([args.batch_size, 256, 4, 4]).half()
-                dist.recv(tensor=grad, src=1)
-                grad = grad.cuda(0).float()
-                print('after grad get')
-            except RuntimeError as runtime:
-                print("backward empty.....")
-                break
-            loss = outputs_queue.get(block=False)
-            loss.backward(grad)
-            if batch_idx % args.buffer_size == 0:
-                optimizer.step()
-                optimizer.zero_grad()
-            batch_idx += 1
-
-
-    if dist.get_rank() == 0:
-        criterion.cuda(0)
-        outputs_queue = ThreadQueue(args.buffer_size)
-        back_process = Process(target=backward)
+    if args.rank == 0:
+        q = Queue(10)
+        back_process = Process(target=backward, args=(layer, q, args, optimizer))
         back_process.start()
+        dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
+        criterion.cuda(0)
+
         for batch_idx, (inputs, targets) in enumerate(trainloader):
             print("batch: " + str(batch_idx))
-            inputs, targets = inputs.cuda(0), targets
-            outputs = layer(inputs)
-            print(outputs.cpu().size())
+            with torch.no_grad:
+                outputs = layer(inputs.cuda(0))
             send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
-            # if batch_idx < 30:
             send_opt.wait()
             targets_queue.put(targets.numpy())
-            outputs_queue.put(outputs)
+            q.put(inputs.numpy())
             print("send....")
         send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
         send_opt.wait()
         back_process.join()
         e.set()
-    elif dist.get_rank() == 1:
+    elif args.rank == 1:
         batch_idx = 0
         train_loss = 0
         correct = 0
         total = 0
         criterion.cuda(1)
         residual = None
+        dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
         while True:
             try:
                 print('before recv.......')
@@ -257,15 +254,15 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
 
 
 def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, start_event):
-    logger = logging.getLogger('ours-rank-' + str(dist.get_rank()))
-    file_handler = logging.FileHandler('vgg-ours-rank-' + str(dist.get_rank()) + '.log')
+    logger = logging.getLogger('ours-rank-' + str(args.rank))
+    file_handler = logging.FileHandler('vgg-ours-rank-' + str(args.rank) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
     epoch_num = 200
     global best_acc
-    r = dist.get_rank()
+    r = args.rank
     for epoch in range(start_epoch, start_epoch + epoch_num):
         print('Training epoch: %d' % epoch)
         train(layer, logger, args, grad_queue, targets_queue, epoch_event, train_size, trainloader, start_event)
@@ -291,9 +288,12 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
 
 if __name__ == "__main__":
 
+    torch.multiprocessing.set_start_method("spawn")
+
+
     parser = argparse.ArgumentParser()
     parser.add_argument('-ip', help='the ip of master', default='89.72.2.41')
-    parser.add_argument('-size', type=int, help='input the sum of node', default=2)
+    parser.add_argument('-size', type=int, help='input the sum of node', default=3)
     parser.add_argument('-path', help='the path fo share file system',
                         default='file:///WORK/sysu_wgwu_4/xpipe/ours/temp')
     parser.add_argument('-rank', type=int, help='the rank of process')
@@ -362,7 +362,7 @@ if __name__ == "__main__":
         print("start_epoch: " + str(start_epoch))
 
     print("init process-" + str(args.rank) + "....")
-    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
+
 
     if True:
         transform_train = transforms.Compose([

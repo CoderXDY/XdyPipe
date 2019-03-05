@@ -114,12 +114,18 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
         start_event.wait()
         batch_idx = 0
         while True:
+            print('backward running')
             try:
-                grad = grad_queue.get(block=True, timeout=1)
+                print('before grad get')
+                #grad = grad_queue.get(block=True, timeout=1)
                 #grad = torch.from_numpy(grad)
                 #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
-                grad = torch.from_numpy(grad).cuda(0).float()
-            except Empty as empty:
+                #grad = torch.from_numpy(grad).cuda(0).float()
+                grad = torch.zeros([args.batch_size, 256, 4, 4]).half()
+                dist.recv(tensor=grad, src=1)
+                grad = grad.cuda(0).float()
+                print('after grad get')
+            except RuntimeError as runtime:
                 print("backward empty.....")
                 break
             loss = outputs_queue.get(block=False)
@@ -139,22 +145,13 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             print("batch: " + str(batch_idx))
             inputs, targets = inputs.cuda(0), targets
             outputs = layer(inputs)
-            try:
-                outputs_queue.put(outputs, timeout=2)
-                print('put......')
-            except Full as full:
-                print('outputs_queue busy...')
-                time.sleep(1)
-                outputs_queue.put(outputs, timeout=2)
-            finally:
-                print(outputs.cpu().size())
-                send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
-                #if batch_idx < 30:
-                send_opt.wait()
-                targets_queue.put(targets.numpy())
-                #send_opt.wait()
-                print("send....")
-
+            print(outputs.cpu().size())
+            send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
+            # if batch_idx < 30:
+            send_opt.wait()
+            targets_queue.put(targets.numpy())
+            outputs_queue.put(outputs)
+            print("send....")
         send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
         send_opt.wait()
         back_process.join()
@@ -168,10 +165,13 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
         residual = None
         while True:
             try:
+                print('before recv.......')
                 rec_val = torch.zeros([args.batch_size, 256, 4, 4])
                 dist.recv(tensor=rec_val, src=0)
                 print("recv.......")
             except RuntimeError as error:
+                send_opt = dist.isend(tensor=torch.zeros(0), dst=0)
+                send_opt.wait()
                 e.wait()
                 break
             rec_val = rec_val.cuda(1)
@@ -183,7 +183,6 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             loss.backward()
             #spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
             #grad_queue.put(spare_grad.cpu().numpy())
-            grad_queue.put(rec_val.grad.cpu().half().numpy())
             if batch_idx == 0:
                 start_event.set()
             if batch_idx % args.buffer_size == 0:
@@ -201,6 +200,8 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             if batch_idx % 10 == 0:
                 logger.error("train:" + str(train_loss / (batch_idx + 1)))
 
+            send_opt = dist.isend(tensor=rec_val.grad.cpu().half(), dst=0)
+            send_opt.wait()
             batch_idx += 1
 
 def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
@@ -345,7 +346,7 @@ if __name__ == "__main__":
         layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2], True)
         layer.cuda(1)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    #layer.share_memory()
+    layer.share_memory()
     cudnn.benchmark = True
 
     best_acc = 0.0
