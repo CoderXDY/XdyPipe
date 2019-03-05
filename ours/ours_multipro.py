@@ -256,18 +256,18 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
 
 
 def run(rank, start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, start_event, q=None):
-    if rank != 2:
-        logger = logging.getLogger('ours-rank-' + str(args.rank))
-        file_handler = logging.FileHandler('vgg-ours-rank-' + str(args.rank) + '.log')
-        file_handler.setLevel(level=logging.DEBUG)
-        formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
 
-    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=rank)
+    dist.init_process_group(backend='gloo', init_method=args.path, world_size=args.size, rank=rank)
+    r = dist.get_rank()
+    logger = logging.getLogger('ours-rank-' + str(args.rank))
+    file_handler = logging.FileHandler('vgg-ours-rank-' + str(args.rank) + '.log')
+    file_handler.setLevel(level=logging.DEBUG)
+    formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
     epoch_num = 200
     global best_acc
-    r = dist.get_rank()
+
     for epoch in range(start_epoch, start_epoch + epoch_num):
         print('Training epoch: %d' % epoch)
         train(layer, logger, args, grad_queue, targets_queue, epoch_event, train_size, trainloader, start_event, q)
