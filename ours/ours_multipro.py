@@ -126,7 +126,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
                 print("backward empty.....")
                 e.set()
                 break
-            inputs = queue.get(block=False)
+            inputs = q.get(block=False)
             outputs = layer(torch.from_numpy(inputs).cuda(0))
             outputs.backward(grad)
             if batch_idx % args.buffer_size == 0:
@@ -147,7 +147,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             print("send....")
         send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
         send_opt.wait()
-        e.set()
+        e.wait()
     elif dist.get_rank() == 1:
         batch_idx = 0
         train_loss = 0
@@ -155,13 +155,12 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
         total = 0
         criterion.cuda(1)
         residual = None
-        dist.init_process_group(backend='gloo', init_method=args.path, world_size=args.size, rank=args.rank)
         while True:
             try:
-                print('before recv.......')
+
                 rec_val = torch.zeros([args.batch_size, 256, 4, 4])
                 dist.recv(tensor=rec_val, src=0)
-                print("recv.......")
+
             except RuntimeError as error:
                 send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
                 send_opt.wait()
