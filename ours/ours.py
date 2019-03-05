@@ -139,16 +139,21 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             print("batch: " + str(batch_idx))
             inputs, targets = inputs.cuda(0), targets
             outputs = layer(inputs)
-            outputs_queue.put(outputs)
-            print('put......')
-
-            print(outputs.cpu().size())
-            send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
-            #if batch_idx < 30:
-            send_opt.wait()
-            targets_queue.put(targets.numpy())
-            #send_opt.wait()
-            print("send....")
+            try:
+                outputs_queue.put(outputs, timeout=2)
+                print('put......')
+            except Full as full:
+                print('outputs_queue busy...')
+                time.sleep(1)
+                outputs_queue.put(outputs, timeout=2)
+            finally:
+                print(outputs.cpu().size())
+                send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
+                #if batch_idx < 30:
+                send_opt.wait()
+                targets_queue.put(targets.numpy())
+                #send_opt.wait()
+                print("send....")
 
         send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
         send_opt.wait()
