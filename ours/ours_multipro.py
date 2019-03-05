@@ -97,47 +97,44 @@ def dense(tensor, shape):
     return sparse_tensor.to_dense().view(shape)
 
 
-def backward(layer, queue, args, optimizer, start_event):
-    dist.init_process_group(backend='gloo', init_method=args.path, world_size=args.size, rank=2)
-    start_event.wait()
-    batch_idx = 0
-    while True:
-        print('backward running')
-        try:
-            print('before grad get')
-                #grad = grad_queue.get(block=True, timeout=1)
-                #grad = torch.from_numpy(grad)
-                #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
-                #grad = torch.from_numpy(grad).cuda(0).float()
-            grad = torch.zeros([args.batch_size, 256, 4, 4]).half()
-            dist.recv(tensor=grad, src=1)
-            grad = grad.cuda(0).float()
-            print('after grad get')
-        except RuntimeError as runtime:
-            print("backward empty.....")
-            break
-        inputs = queue.get(block=False)
-        outputs = layer(torch.from_numpy(inputs).cuda(0))
-        outputs.backward(grad)
-        if batch_idx % args.buffer_size == 0:
-            optimizer.step()
-            optimizer.zero_grad()
-        batch_idx += 1
 
 
 
-def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloader, start_event):
+
+def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloader, start_event, q=None):
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     optimizer.zero_grad()
     layer.train()
-    if args.rank == 0:
-        q = Queue(10)
-        back_process = Process(target=backward, args=(layer, q, args, optimizer, start_event))
-        back_process.start()
-        dist.init_process_group(backend='gloo', init_method=args.path, world_size=args.size, rank=args.rank)
-        criterion.cuda(0)
+    if dist.get_rank() == 2:
+        start_event.wait()
+        batch_idx = 0
+        while True:
+            print('backward running')
+            try:
+                print('before grad get')
+                # grad = grad_queue.get(block=True, timeout=1)
+                # grad = torch.from_numpy(grad)
+                # grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
+                # grad = torch.from_numpy(grad).cuda(0).float()
+                grad = torch.zeros([args.batch_size, 256, 4, 4]).half()
+                dist.recv(tensor=grad, src=1)
+                grad = grad.cuda(0).float()
+                print('after grad get')
+            except RuntimeError as runtime:
+                print("backward empty.....")
+                e.set()
+                break
+            inputs = queue.get(block=False)
+            outputs = layer(torch.from_numpy(inputs).cuda(0))
+            outputs.backward(grad)
+            if batch_idx % args.buffer_size == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+            batch_idx += 1
+
+    elif dist.get_rank() == 0:
 
         for batch_idx, (inputs, targets) in enumerate(trainloader):
             print("batch: " + str(batch_idx))
@@ -150,9 +147,8 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             print("send....")
         send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
         send_opt.wait()
-        back_process.join()
         e.set()
-    elif args.rank == 1:
+    elif dist.get_rank() == 1:
         batch_idx = 0
         train_loss = 0
         correct = 0
@@ -202,12 +198,13 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             batch_idx += 1
 
 def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
-    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
+
     criterion = nn.CrossEntropyLoss()
     criterion.cuda()
     layer.eval()
 
     with torch.no_grad():
+
         if dist.get_rank() == 0:
             for batch_idx, (inputs, targets) in enumerate(testloader):
                 inputs, targets = inputs.cuda(0), targets
@@ -253,34 +250,41 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                     logger.error("eval:" + str(test_loss / (batch_idx + 1)))
 
 
+        elif dist.get_rank() == 2:
+            e.wait()
 
-def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, start_event):
-    logger = logging.getLogger('ours-rank-' + str(args.rank))
-    file_handler = logging.FileHandler('vgg-ours-rank-' + str(args.rank) + '.log')
-    file_handler.setLevel(level=logging.DEBUG)
-    formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+
+
+def run(rank, start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, start_event, q=None):
+    if rank != 2:
+        logger = logging.getLogger('ours-rank-' + str(args.rank))
+        file_handler = logging.FileHandler('vgg-ours-rank-' + str(args.rank) + '.log')
+        file_handler.setLevel(level=logging.DEBUG)
+        formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=rank)
     epoch_num = 200
     global best_acc
-    r = args.rank
+    r = dist.get_rank()
     for epoch in range(start_epoch, start_epoch + epoch_num):
         print('Training epoch: %d' % epoch)
-        train(layer, logger, args, grad_queue, targets_queue, epoch_event, train_size, trainloader, start_event)
+        train(layer, logger, args, grad_queue, targets_queue, epoch_event, train_size, trainloader, start_event, q)
         epoch_event.clear()
         start_event.clear()
         print('Eval epoch: %d' % epoch)
         eval(layer, logger, args, targets_queue, epoch_event, save_event, test_size, testloader)
         epoch_event.clear()
-        if save_event.is_set():
+        if save_event.is_set() and r != 2:
             print('Saving..')
             state = {
                 'net': layer.state_dict(),
                 'acc': best_acc,
                 'epoch': epoch,
             }
-            torch.save(state, './checkpoint/'+ args.model + '-ours-rank-' + str(r) + '_ckpt.t7')
-    if r == 0:
+            torch.save(state, './checkpoint/' + args.model + '-ours-rank-' + str(r) + '_ckpt.t7')
+    if r == 0 or r == 2:
         global_event.wait()
     elif r == 1:
         global_event.set()
@@ -393,6 +397,13 @@ if __name__ == "__main__":
         trainloader = None
         testloader = None
 
-    
-    run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, start_event)
+
+    if args.rank == 0:
+        q = Queue(10)
+        f_p = Process(target=run, args=(0, start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, start_event, q))
+        f_p.start()
+        b_p = Process(target=run, args=(2, start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, start_event, q))
+        b_p.start()
+    else:
+        run(1, start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, start_event)
 
