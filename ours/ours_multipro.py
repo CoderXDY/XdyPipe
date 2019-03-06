@@ -33,13 +33,13 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     optimizer.zero_grad()
     layer.train()
-
+    print(data_size)
     if dist.get_rank() == 2:
         #start_event.wait()
         batch_idx = 0
 
         while batch_idx < data_size:
-            print('backward running')
+            print('backward running: ' + str(batch_idx))
             # grad = grad_queue.get(block=True, timeout=1)
             # grad = torch.from_numpy(grad)
             # grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
@@ -54,6 +54,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
                 optimizer.step()
                 optimizer.zero_grad()
             batch_idx += 1
+        time.sleep(1)
         e.set()
 
     elif dist.get_rank() == 0:
@@ -120,10 +121,11 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
             for batch_idx, (inputs, targets) in enumerate(testloader):
                 inputs, targets = inputs.cuda(0), targets
                 outputs = layer(inputs)
-                targets_queue.put(targets.numpy())
-                print(outputs.size())
+                print('batch: ' + str(batch_idx))
                 send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
                 send_opt.wait()
+                targets_queue.put(targets.numpy())
+                print('send.................................')
             e.wait()
         elif dist.get_rank() == 1:
             batch_idx = 0
@@ -136,8 +138,10 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                 rec_val = torch.zeros([100, 256, 4, 4])
                 dist.recv(tensor=rec_val, src=0)
                 outputs = layer(rec_val.cuda(1))
+                print('after recv.......' + str(batch_idx))
                 targets = targets_queue.get(block=True, timeout=2)
                 targets = torch.from_numpy(targets).cuda(1)
+                print('get target......')
                 loss = criterion(outputs, targets)
                 test_loss += loss.item()
                 _, predicted = outputs.max(1)
@@ -148,12 +152,13 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                              % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
                 if batch_idx % 10 == 0:
                     logger.error("eval:" + str(test_loss / (batch_idx + 1)))
-                batch_idx += 0
+                batch_idx += 1
             print("done....")
             acc = 100. * correct / total
             if acc > best_acc:
                 best_acc = acc
                 save_event.set()
+            time.sleep(1)
             e.set()
 
 
@@ -176,15 +181,17 @@ def run(rank, start_epoch, layer, args, grad_queue, targets_queue, global_event,
     global best_acc
 
     for epoch in range(start_epoch, start_epoch + epoch_num):
-        print('Training epoch: %d' % epoch)
+        print('rank-' + str(r)+' traiaining epoch: %d' % epoch)
         train(layer, logger, args, grad_queue, targets_queue, epoch_event, train_size, trainloader, start_event, q)
         epoch_event.clear()
         start_event.clear()
-        print('Eval epoch: %d' % epoch)
+        print('rank-' + str(r) +' Eaval epoch: %d' % epoch)
         eval(layer, logger, args, targets_queue, epoch_event, save_event, test_size, testloader)
         epoch_event.clear()
         if save_event.is_set() and r != 2:
             print('Saving..')
+            if r == 0:
+                best_acc = 0.0
             state = {
                 'net': layer.state_dict(),
                 'acc': best_acc,
