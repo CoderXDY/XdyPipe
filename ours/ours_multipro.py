@@ -33,12 +33,12 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     optimizer.zero_grad()
     layer.train()
-    batch_num = data_size % args.batch_size
+
     if dist.get_rank() == 2:
         #start_event.wait()
         batch_idx = 0
 
-        while batch_idx < batch_num:
+        while batch_idx < data_size:
             print('backward running')
             # grad = grad_queue.get(block=True, timeout=1)
             # grad = torch.from_numpy(grad)
@@ -75,7 +75,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
         total = 0
         criterion.cuda(1)
         residual = None
-        while batch_idx < batch_num:
+        while batch_idx < data_size:
             rec_val = torch.zeros([args.batch_size, 256, 4, 4])
             dist.recv(tensor=rec_val, src=0)
             rec_val = rec_val.cuda(1)
@@ -114,7 +114,6 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
     criterion = nn.CrossEntropyLoss()
     criterion.cuda()
     layer.eval()
-    batch_num = data_size % args.batch_size
     with torch.no_grad():
 
         if dist.get_rank() == 0:
@@ -133,7 +132,7 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
             total = 0
             save_event.clear()
             global best_acc
-            while batch_idx < batch_num:
+            while batch_idx < data_size:
                 rec_val = torch.zeros([100, 256, 4, 4])
                 dist.recv(tensor=rec_val, src=0)
                 outputs = layer(rec_val.cuda(1))
