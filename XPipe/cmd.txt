@@ -20,7 +20,7 @@ python /WORK/sysu_wgwu_4/xpipe/XPipe/res_pipe_worker.py -ip 89.72.2.41 -size 12 
 
 
 
-
+remember eval() function does not increase the batch_idx
 
 
 

@@ -33,32 +33,28 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     optimizer.zero_grad()
     layer.train()
+    batch_num = data_size % args.batch_size
     if dist.get_rank() == 2:
-        start_event.wait()
+        #start_event.wait()
         batch_idx = 0
-        while True:
+
+        while batch_idx < batch_num:
             print('backward running')
-            try:
-                print('before grad get')
-                # grad = grad_queue.get(block=True, timeout=1)
-                # grad = torch.from_numpy(grad)
-                # grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
-                # grad = torch.from_numpy(grad).cuda(0).float()
-                grad = torch.zeros([args.batch_size, 256, 4, 4]).half()
-                dist.recv(tensor=grad, src=1)
-                grad = grad.cuda(0).float()
-                print('after grad get')
-            except RuntimeError as runtime:
-                print("backward empty.....")
-                e.set()
-                break
-            inputs = q.get(block=False)
+            # grad = grad_queue.get(block=True, timeout=1)
+            # grad = torch.from_numpy(grad)
+            # grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
+            # grad = torch.from_numpy(grad).cuda(0).float()
+            grad = torch.zeros([args.batch_size, 256, 4, 4]).half()
+            dist.recv(tensor=grad, src=1)
+            grad = grad.cuda(0).float()
+            inputs = q.get()
             outputs = layer(torch.from_numpy(inputs).cuda(0))
             outputs.backward(grad)
             if batch_idx % args.buffer_size == 0:
                 optimizer.step()
                 optimizer.zero_grad()
             batch_idx += 1
+        e.set()
 
     elif dist.get_rank() == 0:
 
@@ -67,12 +63,10 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             with torch.no_grad():
                 outputs = layer(inputs.cuda(0))
             send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
-            send_opt.wait()
             targets_queue.put(targets.numpy())
             q.put(inputs.numpy())
+            send_opt.wait()
             print("send....")
-        send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
-        send_opt.wait()
         e.wait()
     elif dist.get_rank() == 1:
         batch_idx = 0
@@ -81,17 +75,9 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
         total = 0
         criterion.cuda(1)
         residual = None
-        while True:
-            try:
-
-                rec_val = torch.zeros([args.batch_size, 256, 4, 4])
-                dist.recv(tensor=rec_val, src=0)
-
-            except RuntimeError as error:
-                send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
-                send_opt.wait()
-                e.wait()
-                break
+        while batch_idx < batch_num:
+            rec_val = torch.zeros([args.batch_size, 256, 4, 4])
+            dist.recv(tensor=rec_val, src=0)
             rec_val = rec_val.cuda(1)
             rec_val.requires_grad_()
             outputs = layer(rec_val)
@@ -101,8 +87,8 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             loss.backward()
             #spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
             #grad_queue.put(spare_grad.cpu().numpy())
-            if batch_idx == 0:
-                start_event.set()
+            #if batch_idx == 0:
+             #   start_event.set()
             if batch_idx % args.buffer_size == 0:
                 optimizer.step()
                 train_loss += loss.item()
@@ -121,13 +107,14 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             send_opt = dist.isend(tensor=rec_val.grad.cpu().half(), dst=2)
             send_opt.wait()
             batch_idx += 1
+        e.wait()
 
 def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
 
     criterion = nn.CrossEntropyLoss()
     criterion.cuda()
     layer.eval()
-
+    batch_num = data_size % args.batch_size
     with torch.no_grad():
 
         if dist.get_rank() == 0:
@@ -138,8 +125,6 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                 print(outputs.size())
                 send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
                 send_opt.wait()
-            send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
-            send_opt.wait()
             e.wait()
         elif dist.get_rank() == 1:
             batch_idx = 0
@@ -148,18 +133,9 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
             total = 0
             save_event.clear()
             global best_acc
-            while True:
-                try:
-                    rec_val = torch.zeros([100, 256, 4, 4])
-                    dist.recv(tensor=rec_val, src=0)
-                except RuntimeError as error:
-                    print("done....")
-                    acc = 100. * correct / total
-                    if acc > best_acc:
-                        best_acc = acc
-                        save_event.set()
-                    e.set()
-                    break
+            while batch_idx < batch_num:
+                rec_val = torch.zeros([100, 256, 4, 4])
+                dist.recv(tensor=rec_val, src=0)
                 outputs = layer(rec_val.cuda(1))
                 targets = targets_queue.get(block=True, timeout=2)
                 targets = torch.from_numpy(targets).cuda(1)
@@ -173,6 +149,13 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                              % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
                 if batch_idx % 10 == 0:
                     logger.error("eval:" + str(test_loss / (batch_idx + 1)))
+                batch_idx += 0
+            print("done....")
+            acc = 100. * correct / total
+            if acc > best_acc:
+                best_acc = acc
+                save_event.set()
+            e.set()
 
 
         elif dist.get_rank() == 2:
