@@ -116,12 +116,10 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
         while True:
             print('backward running')
             try:
-                print('before grad get')
                 grad = grad_queue.get(block=True, timeout=1)
                 #grad = torch.from_numpy(grad)
                 #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
                 grad = torch.from_numpy(grad).cuda(0).float()
-                print('after grad get')
             except Empty as empty:
                 print("backward empty.....")
                 break
@@ -162,7 +160,6 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
         residual = None
         while True:
             try:
-                print('before recv.......')
                 rec_val = torch.zeros([args.batch_size, 256, 4, 4])
                 dist.recv(tensor=rec_val, src=0)
                 print("recv.......")
@@ -178,7 +175,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             loss.backward()
             #spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
             #grad_queue.put(spare_grad.cpu().numpy())
-            print('before grad send')
+            print('before grad put')
             grad_queue.put(rec_val.grad.cpu().half().numpy())
             print('after grad put')
             if batch_idx == 0:
