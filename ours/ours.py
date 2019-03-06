@@ -30,33 +30,7 @@ import numpy as np
 
 
 
-def sparse(tensor, k, half=True, residual=None):
-    #index_value = [(i, dense_tensor[i]) for i in range(dense_tensor) if dense_tensor[i] > 0]
-    #index, value = zip(*index_value)
-    length = 1
-    tensor_size = tensor.size()
-    for i in range(len(tensor_size)):
-        length *= tensor_size[i]
-    array_tensor = tensor.view(length)
-    if residual is None:
-        residual = torch.zeros(length)
-    array_tensor.add_(residual)
-    residual = torch.zeros(length)
-    threshold = array_tensor.topk(k)[0]
-    indexs = []
-    values = []
-    for i in range(len(array_tensor)):
-        if array_tensor[i] < threshold:
-            residual[i] = array_tensor[i]
-            array_tensor[i] = 0.
-        else:
-            indexs.append(i)
-            values.append(array_tensor[i])
-    sparse_tensor = torch.cat([torch.FloatTensor(indexs), torch.FloatTensor(values)])
-    if half:
-        sparse_tensor = sparse_tensor.half()
 
-    return sparse_tensor, residual
 
 
 
@@ -117,9 +91,9 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             print('backward running')
             try:
                 grad = grad_queue.get(block=True, timeout=1)
-                #grad = torch.from_numpy(grad)
-                #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
-                grad = torch.from_numpy(grad).cuda(0).float()
+                grad = torch.from_numpy(grad)
+                grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
+                #grad = torch.from_numpy(grad).cuda(0).float()
             except Empty as empty:
                 print("backward empty.....")
                 break
@@ -173,11 +147,11 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             targets = torch.from_numpy(targets).cuda(1)
             loss = criterion(outputs, targets)
             loss.backward()
-            #spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
-            #grad_queue.put(spare_grad.cpu().numpy())
-            print('before grad put')
-            grad_queue.put(rec_val.grad.cpu().half().numpy())
-            print('after grad put')
+            spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
+            grad_queue.put(spare_grad.cpu().numpy())
+            #print('before grad put')
+            #grad_queue.put(rec_val.grad.cpu().half().numpy())
+            #print('after grad put')
             if batch_idx == 0:
                 start_event.set()
             if batch_idx % args.buffer_size == 0:
