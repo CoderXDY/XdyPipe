@@ -239,7 +239,7 @@ if __name__ == "__main__":
     bm.register('get_targets_queue')
     bm.register('get_save_event')
     bm.register('get_backward_event')
-    m = bm(address=(args.ip, 5000), authkey=b'xpipe')
+    m = bm(address=(args.ip, 5002), authkey=b'xpipe')
     m.connect()
     global_event = m.get_global_event()
     epoch_event = m.get_epoch_event()
@@ -279,7 +279,7 @@ if __name__ == "__main__":
         print("start_epoch: " + str(start_epoch))
 
     print("init process-" + str(args.rank) + "....")
-    dist.init_process_group(backend='gloo', init_method=args.path, world_size=args.size, rank=args.rank)
+    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
 
     if True:
         transform_train = transforms.Compose([
