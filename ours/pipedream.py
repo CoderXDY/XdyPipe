@@ -83,7 +83,6 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
         total = 0
         criterion.cuda(1)
         while True:
-            print("while........................")
             try:
                 rec_val = torch.zeros([args.batch_size, 256, 4, 4])
                 dist.recv(tensor=rec_val, src=0)
@@ -108,11 +107,9 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
             progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
             if not backward_event.is_set():
-                print("set.....")
                 backward_event.set()
             send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=0)
             send_opt.wait()
-            print("send.....")
             if batch_idx % 10 == 0:
                 logger.error("train:" + str(train_loss / (batch_idx + 1)))
 
@@ -123,7 +120,7 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
 
 def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
     criterion = nn.CrossEntropyLoss()
-    criterion.cuda()
+    criterion.cuda(1)
     layer.eval()
 
     with torch.no_grad():

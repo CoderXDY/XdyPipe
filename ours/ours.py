@@ -170,7 +170,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
 
 def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
     criterion = nn.CrossEntropyLoss()
-    criterion.cuda()
+    criterion.cuda(1)
     layer.eval()
 
     with torch.no_grad():

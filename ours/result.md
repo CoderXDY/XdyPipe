@@ -9,6 +9,12 @@ each_epoch:32s
 
 
 ### Forward-Backward Parllelism Experiments ###
+| method | dataset | model | device | lr | batch_size | data_worker | buffer_size | epoch | acc | eachtime |  
+| :------: | :------: | :------: |  :------: | :------: | :------: | :-----: | :------: | :------: | :------: | :------: |
+| layer_dist | cifar10 | vgg16 | 2080ti*2 | 0.01 | 64 | 0 | 2 | ? | ? | ? |  
+| pipedream | cifar10 | vgg16 | 2080ti*2 | 0.01 | 64 | 0 | 2 | ? | ? | 21s |  
+| ours | cifar10 | vgg16 | 2080ti*2 | 0.01 | 64 | 2 | 8/4 | 0 | ? | ? | ? |      
+| 
 
 ### Pipeline Parllelism Experiments ###
 
