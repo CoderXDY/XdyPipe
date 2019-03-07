@@ -102,6 +102,7 @@ formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
 file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 
+
 # Training
 def train(epoch):
     print('\nEpoch: %d' % epoch)
