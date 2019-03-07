@@ -12,15 +12,13 @@ from queue import Empty, Full
 import os
 import psutil
 import gc
-from resnet import ResNet18
-from resnet152_dist import ResNet50
-from resnet_pipe_model import ResPipeNet18, ResPipeNet50
 import torch.backends.cudnn as cudnn
 from visdom import Visdom
 import numpy as np
 parser = argparse.ArgumentParser()
 parser.add_argument('-file', help='the filename of log')
 parser.add_argument('--train', '-r', action='store_true', help='resume from checkpoint')
+parser.add_argument('-count', type=int)
 args = parser.parse_args()
 
 
@@ -28,18 +26,26 @@ path_list = args.file.split()
 path_result = {}
 for path in path_list:
     loss_list = []
+    count = 0
     with open(path, 'r') as f:
         for line in f:
+            if count == args.count:
+                break
             strs = line.strip().split(':')
             if args.train and strs[0] == 'train':
-                loss_list.append(strs[1])
-            elif strs[0] == 'eval':
-                loss_list.append(strs[1])
+                if float(strs[1]) > 2:
+                    print(strs[1])
+                loss_list.append(float(strs[1]))
+                count += 1
+            elif not args.train and strs[0] == 'eval':
+                print(strs[0])
+                loss_list.append(float(strs[1]))
+                count += 1
     path_result[path] = loss_list
 
-vis = visdom.Visom()
+vis = Visdom()
 
-x = list(range(600))
+x = list(range(args.count))
 
 stack = []
 for name, result in path_result.items():
