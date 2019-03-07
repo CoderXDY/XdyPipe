@@ -66,7 +66,6 @@ def model_par_train(layer, logger, args, grad_queue, targets_queue, e, data_size
             try:
                 rec_val = torch.zeros([args.batch_size, 256, 4, 4]) # difference model has difference shape
                 dist.recv(tensor=rec_val, src=0)
-                print("recv.......")
             except RuntimeError as error:
                 e.set()
                 break

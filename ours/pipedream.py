@@ -87,7 +87,7 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
             try:
                 rec_val = torch.zeros([args.batch_size, 256, 4, 4])
                 dist.recv(tensor=rec_val, src=0)
-                print("recv.......")
+
             except RuntimeError as error:
                 print("runtime........................")
                 #e.wait()

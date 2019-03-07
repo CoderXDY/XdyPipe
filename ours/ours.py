@@ -88,7 +88,6 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
         start_event.wait()
         batch_idx = 0
         while True:
-            print('backward running')
             try:
                 grad = grad_queue.get(block=True, timeout=1)
                 #grad = torch.from_numpy(grad)
@@ -114,7 +113,6 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             print("batch: " + str(batch_idx))
             inputs, targets = inputs.cuda(0), targets
             outputs = layer(inputs)
-            print(outputs.cpu().size())
             send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
             # if batch_idx < 30:
             send_opt.wait()
@@ -136,7 +134,6 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             try:
                 rec_val = torch.zeros([args.batch_size, 256, 4, 4])
                 dist.recv(tensor=rec_val, src=0)
-                print("recv.......")
             except RuntimeError as error:
                 e.wait()
                 break
@@ -179,10 +176,10 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
     with torch.no_grad():
         if dist.get_rank() == 0:
             for batch_idx, (inputs, targets) in enumerate(testloader):
+                print('batch_idx: ' + str(batch_idx))
                 inputs, targets = inputs.cuda(0), targets
                 outputs = layer(inputs)
                 targets_queue.put(targets.numpy())
-                print(outputs.size())
                 send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
                 send_opt.wait()
             send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
