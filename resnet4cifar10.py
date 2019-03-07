@@ -71,10 +71,15 @@ class ResNet(nn.Module):
 
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
+        print('in_plance: ' + str(self.in_planes))
         self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
+        print('in_plance: ' + str(self.in_planes))
         self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
+        print('in_plance: ' + str(self.in_planes))
         self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
+        print('in_plance: ' + str(self.in_planes))
         self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
+        print('in_plance: ' + str(self.in_planes))
         self.linear = nn.Linear(512*block.expansion, num_classes)
 
     def _make_layer(self, block, planes, num_blocks, stride):
@@ -88,9 +93,13 @@ class ResNet(nn.Module):
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.layer1(out)
+        print(out.size())
         out = self.layer2(out)
+        print(out.size())
         out = self.layer3(out)
+        print(out.size())
         out = self.layer4(out)
+        print(out.size())
         out = F.avg_pool2d(out, 4)
         out = out.view(out.size(0), -1)
         out = self.linear(out)
@@ -114,8 +123,9 @@ def ResNet152():
 
 
 def test():
-    net = ResNet18()
+    net = ResNet50()
     y = net(torch.randn(1,3,32,32))
     print(y.size())
+
 
 # test()
