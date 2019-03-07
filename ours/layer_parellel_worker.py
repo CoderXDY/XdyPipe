@@ -143,6 +143,7 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                              % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
                 if batch_idx % 10 == 0:
                     logger.error("eval:" + str(test_loss / (batch_idx + 1)))
+                batch_idx += 1
 
 
 
