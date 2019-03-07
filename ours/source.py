@@ -95,8 +95,8 @@ optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5
 
 
 
-logger = logging.getLogger('source-rank-' + str(dist.get_rank()))
-file_handler = logging.FileHandler('source-rank-' + str(dist.get_rank()) + '.log')
+logger = logging.getLogger('source-vgg')
+file_handler = logging.FileHandler('source-vgg.log')
 file_handler.setLevel(level=logging.DEBUG)
 formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
 file_handler.setFormatter(formatter)
