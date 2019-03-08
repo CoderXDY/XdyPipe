@@ -86,8 +86,8 @@ def model_par_train(layer, logger, args, grad_queue, targets_queue, e, data_size
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
             send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=0)
             send_opt.wait()
-            if batch_idx % 10 == 0:
-                logger.error("train:" + str(train_loss / (batch_idx + 1)))
+            #if batch_idx % 10 == 0:
+            logger.error("train:" + str(train_loss / (batch_idx + 1)))
 
             batch_idx += 1
 
@@ -140,8 +140,8 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
 
                 progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                              % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-                if batch_idx % 10 == 0:
-                    logger.error("eval:" + str(test_loss / (batch_idx + 1)))
+                #if batch_idx % 10 == 0:
+                logger.error("eval:" + str(test_loss / (batch_idx + 1)))
                 batch_idx += 1
 
 
