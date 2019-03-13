@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import logging
 import time
-from model.res import THResNetGroup0, THResNetGroup1
+from model.res import THResNet101Group0, THResNet101Group2, THResNet101Group1
 from model.vgg_module import VggLayer
 import torchvision
 import torchvision.transforms as transforms
@@ -30,25 +30,23 @@ import numpy as np
 
 
 
-def model_par_train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloader):
+def model_par_train(layer, logger, args, targets_queue, e, data_size, trainloader):
 
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss().cuda()
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     layer.train()
 
     if dist.get_rank() == 0:
-        criterion.cuda(0)
         for batch_idx, (inputs, targets) in enumerate(trainloader):
             print("batch: " + str(batch_idx))
-            inputs, targets = inputs.cuda(0), targets
+            inputs, targets = inputs.cuda(), targets
             optimizer.zero_grad()
             outputs = layer(inputs)
             print('put......')
             targets_queue.put(targets.numpy())
-            print(outputs.cpu().size())
             dist.send(tensor=outputs.cpu(), dst=1)
-            print("send....")
-            grad = torch.zeros([args.batch_size, 256, 4, 4])# difference model has difference shape
+            print("send to rank 1....")
+            grad = torch.zeros([args.batch_size, 512, 16, 16])# difference model has difference shape
             dist.recv(tensor=grad, src=1)
             outputs.backward(grad.cuda(0))
             optimizer.step()
@@ -58,23 +56,45 @@ def model_par_train(layer, logger, args, grad_queue, targets_queue, e, data_size
         e.wait()
     elif dist.get_rank() == 1:
         batch_idx = 0
+        while True:
+            try:
+                rec_val = torch.zeros([args.batch_size, 512, 16, 16])  # difference model has difference shape
+                dist.recv(tensor=rec_val, src=0)
+            except RuntimeError as error:
+                send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
+                send_opt.wait()
+                e.wait()
+                break
+            rec_val = rec_val.cuda()
+            rec_val.requires_grad_()
+            outputs = layer(rec_val)
+            send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
+            send_opt.wait()
+            grad = torch.zeros([args.batch_size, 1024, 8, 8])  # difference model has difference shape
+            dist.recv(tensor=grad, src=2)
+            outputs.backward(grad.cuda())
+            send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=0)
+            send_opt.wait()
+            batch_idx += 1
+
+    elif dist.get_rank() == 2:
+        batch_idx = 0
         train_loss = 0
         correct = 0
         total = 0
-        criterion.cuda(1)
         while True:
             try:
-                rec_val = torch.zeros([args.batch_size, 256, 4, 4]) # difference model has difference shape
-                dist.recv(tensor=rec_val, src=0)
+                rec_val = torch.zeros([args.batch_size, 1024, 8, 8]) # difference model has difference shape
+                dist.recv(tensor=rec_val, src=1)
             except RuntimeError as error:
                 e.set()
                 break
-            rec_val = rec_val.cuda(1)
+            rec_val = rec_val.cuda()
             rec_val.requires_grad_()
             optimizer.zero_grad()
             outputs = layer(rec_val)
             targets = targets_queue.get(block=True, timeout=2)
-            targets = torch.from_numpy(targets).cuda(1)
+            targets = torch.from_numpy(targets).cuda()
             loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
@@ -84,18 +104,16 @@ def model_par_train(layer, logger, args, grad_queue, targets_queue, e, data_size
             correct += predicted.eq(targets).sum().item()
             progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-            send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=0)
+            send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=1)
             send_opt.wait()
-            #if batch_idx % 10 == 0:
             logger.error("train:" + str(train_loss / (batch_idx + 1)))
-
             batch_idx += 1
 
 
 
 def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
     criterion = nn.CrossEntropyLoss()
-    criterion.cuda(1)
+    criterion.cuda()
     layer.eval()
 
     with torch.no_grad():
@@ -104,12 +122,28 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                 inputs, targets = inputs.cuda(0), targets
                 outputs = layer(inputs)
                 targets_queue.put(targets.numpy())
-                print(outputs.size())
+                print("after put....")
                 send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
                 send_opt.wait()
             send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
             send_opt.wait()
             e.wait()
+        elif dist.get_rank() == 1:
+            batch_idx = 0
+            while True:
+                try:
+                    rec_val = torch.zeros([100, 512, 16, 16])  # difference model has difference shape
+                    dist.recv(tensor=rec_val, src=0)
+                except RuntimeError as error:
+                    send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
+                    send_opt.wait()
+                    e.wait()
+                    break
+                outputs = layer(rec_val.cuda())
+                send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
+                send_opt.wait()
+                batch_idx += 1
+
         elif dist.get_rank() == 1:
             batch_idx = 0
             test_loss = 0
@@ -119,8 +153,8 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
             global best_acc
             while True:
                 try:
-                    rec_val = torch.zeros([100, 256, 4, 4]) #difference model has difference shape
-                    dist.recv(tensor=rec_val, src=0)
+                    rec_val = torch.zeros([100, 1024, 8, 8]) #difference model has difference shape
+                    dist.recv(tensor=rec_val, src=1)
                 except RuntimeError as error:
                     print("done....")
                     acc = 100. * correct / total
@@ -129,9 +163,9 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                         save_event.set()
                     e.set()
                     break
-                outputs = layer(rec_val.cuda(1))
+                outputs = layer(rec_val.cuda())
                 targets = targets_queue.get(block=True, timeout=2)
-                targets = torch.from_numpy(targets).cuda(1)
+                targets = torch.from_numpy(targets).cuda()
                 loss = criterion(outputs, targets)
                 test_loss += loss.item()
                 _, predicted = outputs.max(1)
@@ -146,9 +180,9 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
 
 
 
-def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader):
+def run(start_epoch, layer, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader):
     logger = logging.getLogger(args.model + '-rank-' + str(dist.get_rank()))
-    file_handler = logging.FileHandler(args.model + '-rank-' + str(dist.get_rank()) + '.log')
+    file_handler = logging.FileHandler(args.model + '-normal-rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
@@ -158,7 +192,7 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
     r = dist.get_rank()
     for epoch in range(start_epoch, start_epoch + epoch_num):
         print('Training epoch: %d' % epoch)
-        model_par_train(layer, logger, args, grad_queue, targets_queue, epoch_event, train_size, trainloader)
+        model_par_train(layer, logger, args, targets_queue, epoch_event, train_size, trainloader)
         epoch_event.clear()
         print('Eval epoch: %d' % epoch)
         eval(layer, logger, args, targets_queue, epoch_event, save_event, test_size, testloader)
@@ -170,10 +204,10 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
                 'acc': best_acc,
                 'epoch': epoch,
             }
-            torch.save(state, './checkpoint/' + args.model + '-rank-' + str(r) + '_ckpt.t7')
-    if r == 0:
+            torch.save(state, './checkpoint/' + args.model + '-normal-rank-' + str(r) + '_ckpt.t7')
+    if r == 0 or r == 1:
         global_event.wait()
-    elif r == 1:
+    elif r == 2:
         global_event.set()
 
 
@@ -182,10 +216,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ip', help='the ip of master',default='89.72.2.41')
-    parser.add_argument('-size', type=int, help='input the sum of node', default=2)
+    parser.add_argument('-size', type=int, help='input the sum of node', default=3)
     parser.add_argument('-path', help='the path fo share file system', default='file:///WORK/sysu_wgwu_4/xpipe/ours/temp')
     parser.add_argument('-rank', type=int, help='the rank of process')
-    parser.add_argument('-layer_type', type=int, help='type of layer: input:0, block:1, output:2')
     parser.add_argument('-batch_size', type=int, help='size of batch', default=64)
     parser.add_argument('-data_worker', type=int, help='the number of dataloader worker', default=0)
     parser.add_argument('-epoch', type=int)
@@ -196,7 +229,6 @@ if __name__ == "__main__":
     print("size: " + str(args.size))
     print("path: " + args.path)
     print("rank: " + str(args.rank))
-    print("layer_type: " + str(args.layer_type))
     print("batch_size: " + str(args.batch_size))
     print("data_worker: " + str(args.data_worker))
     print("model: " + str(args.model))
@@ -217,18 +249,16 @@ if __name__ == "__main__":
 
 
 
-    """
-    difference model
-    """
-    node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M']
-    node_cfg_1 = [512, 512, 512, 'M', 512, 512, 512, 'M']
 
     if args.rank == 0:
-        layer = VggLayer(node_cfg_0)
-        layer.cuda(0)
+        layer = THResNet101Group0()
+        layer.cuda()
     elif args.rank == 1:
-        layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2], True)
-        layer.cuda(1)
+        layer = THResNet101Group1()
+        layer.cuda()
+    elif args.rank == 2:
+        layer = THResNet101Group2()
+        layer.cuda()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     cudnn.benchmark = True
@@ -238,7 +268,7 @@ if __name__ == "__main__":
     if args.resume:
         print('==> Resuming from checkpoint..')
         assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-        checkpoint = torch.load('./checkpoint/' + args.model + '-rank-' + str(args.rank) + '_ckpt.t7')
+        checkpoint = torch.load('./checkpoint/' + args.model + '-normal-rank-' + str(args.rank) + '_ckpt.t7')
         layer.load_state_dict(checkpoint['net'])
         best_acc = checkpoint['acc']
         start_epoch = checkpoint['epoch']
@@ -277,5 +307,5 @@ if __name__ == "__main__":
         testloader = None
 
     
-    run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader)
+    run(start_epoch, layer, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader)
 

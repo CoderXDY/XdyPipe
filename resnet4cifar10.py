@@ -85,9 +85,14 @@ class ResNet(nn.Module):
     def _make_layer(self, block, planes, num_blocks, stride):
         strides = [stride] + [1]*(num_blocks-1)
         layers = []
+        count = 1
         for stride in strides:
             layers.append(block(self.in_planes, planes, stride))
             self.in_planes = planes * block.expansion
+            if count == 13:
+                print('stride:' + str(stride))
+                print('---in_plance:' + str(self.in_planes))
+            count += 1
         return nn.Sequential(*layers)
 
     def forward(self, x):
@@ -123,7 +128,7 @@ def ResNet152():
 
 
 def test():
-    net = ResNet50()
+    net = ResNet101()
     y = net(torch.randn(1,3,32,32))
     print(y.size())
 

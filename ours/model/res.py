@@ -97,6 +97,8 @@ class ResBlockLayer(nn.Module):
     def get_in_plances(self):
         return self.in_planes
 
+
+
 class ResOutputLayer(nn.Module):
 
     def __init__(self, block, num_classes=10):
@@ -187,13 +189,75 @@ class THResNet50Group1(nn.Module):
 
 
 
+"""
+3-nodes for ResNet 101
+
+
+in_plance: 64
+in_plance: 256
+in_plance: 512
+in_plance: 1024
+in_plance: 2048
+torch.Size([1, 256, 32, 32])
+torch.Size([1, 512, 16, 16])
+torch.Size([1, 1024, 8, 8])
+torch.Size([1, 2048, 4, 4])
+torch.Size([1, 10])
+"""
+class THResNet101Group0(nn.Module):
+    def __init__(self):
+        super(THResNet101Group0, self).__init__()
+        self.layer0 = ResInputLayer()
+        self.layer1 = ResBlockLayer(Bottleneck, 64, 3, 1, 64)
+        self.layer2 = ResBlockLayer(Bottleneck, 128, 4, 2, 256)
+
+    def forward(self, x):
+        out = self.layer0(x)
+        out = self.layer1(out)
+        out = self.layer2(out)
+        return out
+
+class THResNet101Group1(nn.Module):
+    def __init__(self):
+        super(THResNet101Group1, self).__init__()
+        self.layer = ResBlockLayer(Bottleneck, 256, 13, 2, 512)
+
+    def forward(self, x):
+        out = self.layer(x)
+        return out
+
+class THResNet101Group2(nn.Module):
+    def __init__(self):
+        super(THResNet101Group2, self).__init__()
+        self.layer0 = ResBlockLayer(Bottleneck, 256, 10, 1, 1024)
+        self.layer1 = ResBlockLayer(Bottleneck, 512, 3, 2, 1024)
+        self.layer2 = ResOutputLayer(Bottleneck)
+
+    def forward(self, x):
+        out = self.layer0(x)
+        out = self.layer1(out)
+        out = self.layer2(out)
+        return out
+
+
+
+
+
+
+
+
 if __name__ == '__main__':
-    group0 = THResNet50Group0()
-    group1 = THResNet50Group1()
+    group0 = THResNet101Group0()
+    group1 = THResNet101Group1()
+    group2 = THResNet101Group2()
     x = torch.randn(1, 3, 32, 32)
     x = group0(x)
-    y = group1(x)
+    print("group 0:" + str(x.size()))
+    x = group1(x)
+    print("group 1: " + str(x.size()))
+    y = group2(x)
     print(y.size())
+
 
 
 
