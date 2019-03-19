@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import logging
 import time
-from model.res import THResNetGroup0, THResNetGroup1
+from model.res import THResNet101Group0, THResNet101Group2, THResNet101Group1
 from model.vgg_module import VggLayer
 import torchvision
 import torchvision.transforms as transforms
@@ -33,18 +33,17 @@ import numpy as np
 
 def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size, trainloader):
 
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss().cuda()
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     layer.train()
 
     if dist.get_rank() == 0:
-        criterion.cuda(0)
-        output_queue = ThreadQueue(2)
+        output_queue = ThreadQueue(3)
         data_iter = iter(trainloader)
         batch_idx = 0
         while True:
             try:
-                if output_queue.qsize() == 2:
+                if output_queue.qsize() == 3:
                     backward_event.wait()
                     optimizer.zero_grad()
                     grad = torch.zeros([args.batch_size, 256, 4, 4])
@@ -56,7 +55,7 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
                     continue
                 else:
                     inputs, targets = next(data_iter)
-                    inputs = inputs.cuda(0)
+                    inputs = inputs.cuda()
                     targets_queue.put(targets.numpy(), block=False)
                     outputs = layer(inputs)
                     send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
@@ -76,12 +75,57 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
                     optimizer.step()
                     #backward_event.clear()
                 break
+
+    elif dist.get_rank() == 1:
+        batch_idx = 0
+        while True:
+            try:
+                if output_queue.qsize() == 3:
+                    backward_event.wait()
+                    optimizer.zero_grad()
+                    grad = torch.zeros([args.batch_size, 256, 4, 4])
+                    dist.recv(tensor=grad, src=1)
+                    outputs = output_queue.get()
+                    outputs.backward(grad.cuda(0))
+                    optimizer.step()
+                    backward_event.clear()
+                    continue
+                else:
+                    try:
+                        rec_val = torch.zeros([args.batch_size, 512, 16, 16])
+                        dist.recv(tensor=rec_val, src=0)
+
+                    except RuntimeError as error:
+                        print("runtime........................")
+                        # e.wait()
+                        break
+
+                    rec_val = rec_val.cuda()
+                    rec_val.requires_grad_()
+                    outputs = layer(rec_val)
+                    send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
+                    send_opt.wait()
+                    batch_idx += 1
+            except StopIteration as stop_e:
+                send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
+                send_opt.wait()
+                while output_queue.qsize() > 0:
+                    #backward_event.wait()
+                    optimizer.zero_grad()
+                    grad = torch.zeros([args.batch_size, 256, 4, 4])
+                    dist.recv(tensor=grad, src=1)
+                    outputs = output_queue.get()
+                    outputs.backward(grad.cuda(0))
+                    optimizer.step()
+                    #backward_event.clear()
+                break
+
+
     elif dist.get_rank() == 1:
         batch_idx = 0
         train_loss = 0
         correct = 0
         total = 0
-        criterion.cuda(1)
         while True:
             try:
                 rec_val = torch.zeros([args.batch_size, 256, 4, 4])
@@ -185,6 +229,7 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
         print('Training epoch: %d' % epoch)
         pipe_dream(layer, logger, args, backward_event, targets_queue, epoch_event, train_size, trainloader)
         epoch_event.clear()
+        time.sleep(1)
         print('Eval epoch: %d' % epoch)
         eval(layer, logger, args, targets_queue, epoch_event, save_event, test_size, testloader)
         epoch_event.clear()
@@ -196,9 +241,10 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
                 'epoch': epoch,
             }
             torch.save(state, './checkpoint/' + args.model + '-pipedream-rank-' + str(r) + '_ckpt.t7')
-    if r == 0:
+        time.sleep(1)
+    if r == 0 or r == 1:
         global_event.wait()
-    elif r == 1:
+    elif r == 2:
         global_event.set()
 
 
@@ -206,13 +252,11 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser = argparse.ArgumentParser()
     parser.add_argument('-ip', help='the ip of master', default='89.72.2.41')
-    parser.add_argument('-size', type=int, help='input the sum of node', default=2)
+    parser.add_argument('-size', type=int, help='input the sum of node', default=3)
     parser.add_argument('-path', help='the path fo share file system',
                         default='file:///WORK/sysu_wgwu_4/xpipe/ours/temp')
     parser.add_argument('-rank', type=int, help='the rank of process')
-    parser.add_argument('-layer_type', type=int, help='type of layer: input:0, block:1, output:2')
     parser.add_argument('-batch_size', type=int, help='size of batch', default=64)
     parser.add_argument('-data_worker', type=int, help='the number of dataloader worker', default=0)
     parser.add_argument('-epoch', type=int)
@@ -224,7 +268,6 @@ if __name__ == "__main__":
     print("size: " + str(args.size))
     print("path: " + args.path)
     print("rank: " + str(args.rank))
-    print("layer_type: " + str(args.layer_type))
     print("batch_size: " + str(args.batch_size))
     print("data_worker: " + str(args.data_worker))
     print("model: " + str(args.model))
@@ -247,18 +290,15 @@ if __name__ == "__main__":
     if args.mode != 0:
         backward_event = m.get_backward_event()
 
-    """
-        difference model
-        """
-    node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M']
-    node_cfg_1 = [512, 512, 512, 'M', 512, 512, 512, 'M']
-
     if args.rank == 0:
-        layer = VggLayer(node_cfg_0)
-        layer.cuda(0)
+        layer = THResNet101Group0()
+        layer.cuda()
     elif args.rank == 1:
-        layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2], True)
-        layer.cuda(1)
+        layer = THResNet101Group1()
+        layer.cuda()
+    elif args.rank == 2:
+        layer = THResNet101Group2()
+        layer.cuda()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     #layer.share_memory()
     cudnn.benchmark = True

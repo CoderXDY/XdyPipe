@@ -140,6 +140,30 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             rec_val = rec_val.cuda(1)
             rec_val.requires_grad_()
             outputs = layer(rec_val)
+            if batch_idx % args.buffer_size == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+            send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
+            # if batch_idx < 30:
+            send_opt.wait()
+
+    elif dist.get_rank() == 2:
+        batch_idx = 0
+        train_loss = 0
+        correct = 0
+        total = 0
+        criterion.cuda(1)
+        residual = None
+        while True:
+            try:
+                rec_val = torch.zeros([args.batch_size, 256, 4, 4])
+                dist.recv(tensor=rec_val, src=0)
+            except RuntimeError as error:
+                e.wait()
+                break
+            rec_val = rec_val.cuda(1)
+            rec_val.requires_grad_()
+            outputs = layer(rec_val)
             targets = targets_queue.get(block=True, timeout=2)
             targets = torch.from_numpy(targets).cuda(1)
             loss = criterion(outputs, targets)
@@ -222,8 +246,8 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
 
 
 def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, start_event):
-    logger = logging.getLogger('ours-rank-' + str(dist.get_rank()))
-    file_handler = logging.FileHandler('vgg-ours-rank-' + str(dist.get_rank()) + '.log')
+    logger = logging.getLogger(args.model + '-ours-rank-' + str(dist.get_rank()))
+    file_handler = logging.FileHandler(args.model +'-ours3-rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
@@ -246,8 +270,8 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
                 'acc': best_acc,
                 'epoch': epoch,
             }
-            torch.save(state, './checkpoint/'+ args.model + '-ours-rank-' + str(r) + '_ckpt.t7')
-    if r == 0:
+            torch.save(state, './checkpoint/'+ args.model + '-ours3-rank-' + str(r) + '_ckpt.t7')
+    if r == 0 or r == 1:
         global_event.wait()
     elif r == 1:
         global_event.set()
@@ -258,11 +282,10 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ip', help='the ip of master', default='89.72.2.41')
-    parser.add_argument('-size', type=int, help='input the sum of node', default=2)
+    parser.add_argument('-size', type=int, help='input the sum of node', default=3)
     parser.add_argument('-path', help='the path fo share file system',
                         default='file:///WORK/sysu_wgwu_4/xpipe/ours/temp')
     parser.add_argument('-rank', type=int, help='the rank of process')
-    parser.add_argument('-layer_type', type=int, help='type of layer: input:0, block:1, output:2')
     parser.add_argument('-batch_size', type=int, help='size of batch', default=64)
     parser.add_argument('-data_worker', type=int, help='the number of dataloader worker', default=2)
     parser.add_argument('-epoch', type=int)
@@ -274,7 +297,6 @@ if __name__ == "__main__":
     print("size: " + str(args.size))
     print("path: " + args.path)
     print("rank: " + str(args.rank))
-    print("layer_type: " + str(args.layer_type))
     print("batch_size: " + str(args.batch_size))
     print("data_worker: " + str(args.data_worker))
     print("model: " + str(args.model))
@@ -301,17 +323,17 @@ if __name__ == "__main__":
     """
         difference model
         """
-    node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M']
-    node_cfg_1 = [512, 512, 512, 'M', 512, 512, 512, 'M']
-
     if args.rank == 0:
-        layer = VggLayer(node_cfg_0)
-        layer.cuda(0)
+        layer = THResNet101Group0()
+        layer.cuda()
     elif args.rank == 1:
-        layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2], True)
-        layer.cuda(1)
+        layer = THResNet101Group1()
+        layer.cuda()
+    elif args.rank == 2:
+        layer = THResNet101Group2()
+        layer.cuda()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    layer.share_memory()
+    #layer.share_memory()
     cudnn.benchmark = True
 
     best_acc = 0.0
@@ -319,7 +341,7 @@ if __name__ == "__main__":
     if args.resume:
         print('==> Resuming from checkpoint..')
         assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-        checkpoint = torch.load('./checkpoint/' + args.model + '-ours-rank-' + str(args.rank) + '_ckpt.t7')
+        checkpoint = torch.load('./checkpoint/' + args.model + '-ours3-rank-' + str(args.rank) + '_ckpt.t7')
         layer.load_state_dict(checkpoint['net'])
         best_acc = checkpoint['acc']
         start_epoch = checkpoint['epoch']
@@ -353,7 +375,7 @@ if __name__ == "__main__":
                                                  num_workers=args.data_worker, drop_last=True)
         train_size = len(trainloader)
         test_size = len(testloader)
-    if args.rank == 1:
+    if args.rank == 1 or args.rank == 2:
         trainloader = None
         testloader = None
 

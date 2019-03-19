@@ -87,6 +87,7 @@ def model_par_train(layer, logger, args, targets_queue, e, data_size, trainloade
                 rec_val = torch.zeros([args.batch_size, 1024, 8, 8]) # difference model has difference shape
                 dist.recv(tensor=rec_val, src=1)
             except RuntimeError as error:
+                print(" done....")
                 e.set()
                 break
             rec_val = rec_val.cuda()
@@ -135,7 +136,7 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                     rec_val = torch.zeros([100, 512, 16, 16])  # difference model has difference shape
                     dist.recv(tensor=rec_val, src=0)
                 except RuntimeError as error:
-                    send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
+                    send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
                     send_opt.wait()
                     e.wait()
                     break
@@ -144,7 +145,7 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                 send_opt.wait()
                 batch_idx += 1
 
-        elif dist.get_rank() == 1:
+        elif dist.get_rank() == 2:
             batch_idx = 0
             test_loss = 0
             correct = 0
@@ -194,6 +195,7 @@ def run(start_epoch, layer, args, targets_queue, global_event, epoch_event, save
         print('Training epoch: %d' % epoch)
         model_par_train(layer, logger, args, targets_queue, epoch_event, train_size, trainloader)
         epoch_event.clear()
+        time.sleep(1)
         print('Eval epoch: %d' % epoch)
         eval(layer, logger, args, targets_queue, epoch_event, save_event, test_size, testloader)
         epoch_event.clear()
@@ -205,6 +207,7 @@ def run(start_epoch, layer, args, targets_queue, global_event, epoch_event, save
                 'epoch': epoch,
             }
             torch.save(state, './checkpoint/' + args.model + '-normal-rank-' + str(r) + '_ckpt.t7')
+        time.sleep(1)
     if r == 0 or r == 1:
         global_event.wait()
     elif r == 2:

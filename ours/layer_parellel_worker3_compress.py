@@ -33,6 +33,42 @@ import numpy as np
 
 
 
+def sparse2(tensor, k, half=True, residual=None):
+
+    array_tensor = tensor.view(-1)
+    if residual is None:
+        residual = torch.zeros(array_tensor.size(), device=torch.device('cuda:0'))
+    array_tensor.add_(residual)
+    threshold = array_tensor.topk(int(array_tensor.nelement()*k) if int(array_tensor.nelement()*k) != 0 else 1)[0][-1]
+    residual = torch.where(abs(array_tensor) < threshold, array_tensor, torch.zeros(array_tensor.size(), device=torch.device('cuda:1')))
+    array_tensor[abs(array_tensor) < threshold] = 0.
+    indexs = array_tensor.nonzero().t()
+    values = array_tensor[indexs[0]]
+    sparse_tensor = torch.cat([indexs[0].float(), values])
+    if half:
+        sparse_tensor = sparse_tensor.half()
+
+    return sparse_tensor, residual
+
+
+
+
+
+def dense(tensor, shape):
+    if tensor.type() != 'torch.FloatTensor':
+        tensor = tensor.float()
+    half_size = int(len(tensor) / 2)
+    indexs = tensor[: half_size].view(1, half_size).long()
+    values = tensor[half_size:]
+    length = 1
+    for i in range(len(shape)):
+        length *= shape[i]
+    sparse_tensor = torch.sparse.FloatTensor(indexs, values, torch.Size([length]))
+    return sparse_tensor.to_dense().view(shape)
+
+
+
+
 
 
 def model_par_train(layer, logger, args, targets_queue, e, data_size, trainloader):
@@ -42,6 +78,7 @@ def model_par_train(layer, logger, args, targets_queue, e, data_size, trainloade
     layer.train()
 
     if dist.get_rank() == 0:
+        residual = None
         for batch_idx, (inputs, targets) in enumerate(trainloader):
             print("batch: " + str(batch_idx))
             inputs, targets = inputs.cuda(), targets
@@ -49,7 +86,8 @@ def model_par_train(layer, logger, args, targets_queue, e, data_size, trainloade
             outputs = layer(inputs)
             print('put......')
             targets_queue.put(targets.numpy())
-            dist.send(tensor=outputs.cpu(), dst=1)
+            spare_grad, residual = sparse2(outputs, 0.01, True, residual)
+            dist.send(tensor=outputs.cpu().half(), dst=1)
             print("send to rank 1....")
             grad = torch.zeros([args.batch_size, 512, 16, 16])# difference model has difference shape
             dist.recv(tensor=grad, src=1)
@@ -63,8 +101,9 @@ def model_par_train(layer, logger, args, targets_queue, e, data_size, trainloade
         batch_idx = 0
         while True:
             try:
-                rec_val = torch.zeros([args.batch_size, 512, 16, 16])  # difference model has difference shape
+                rec_val = torch.zeros().half()  # difference model has difference shape
                 dist.recv(tensor=rec_val, src=0)
+                rec_val = dense(rec_val, [args.batch_size, 512, 16, 16])
             except RuntimeError as error:
                 send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
                 send_opt.wait()
