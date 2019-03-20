@@ -22,7 +22,7 @@ global_event = Event()
 save_event = Event()
 backward_event = Event()
 start_event = Event()
-
+start_event = Event()
 
 def get_epoch_event():
     return epoch_event
@@ -49,13 +49,16 @@ if __name__ == "__main__":
         os.remove(args.path)
     grad_queue = Queue(args.buffer)
     targets_queue = Queue(args.buffer)
+    grad_queue2 = Queue(args.buffer)
     bm.register('get_epoch_event', callable=get_epoch_event)
     bm.register('get_global_event', callable=get_global_event)
     bm.register('get_grad_queue', callable=lambda: grad_queue)
+    bm.register('get_grad_queue2', callable=lambda: grad_queue2)
     bm.register('get_targets_queue', callable=lambda: targets_queue)
     bm.register('get_save_event', callable=lambda: save_event)
     bm.register('get_backward_event', callable=lambda: backward_event)
     bm.register('get_start_thread_event', callable=lambda: start_event)
+    bm.register('get_start_thread_event2', callable=lambda: start_event2)
     m = bm(address=(args.ip, 5002), authkey=b'xpipe')
     m.start()
     g_e = m.get_global_event()
