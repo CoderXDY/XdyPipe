@@ -90,9 +90,9 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
         while True:
             try:
                 grad = grad_queue.get(block=True, timeout=1)
-                #grad = torch.from_numpy(grad)
-                #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
-                grad = torch.from_numpy(grad).cuda(0).float()
+                grad = torch.from_numpy(grad)
+                grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
+                #grad = torch.from_numpy(grad).cuda(0).float()
             except Empty as empty:
                 print("backward empty.....")
                 break
@@ -144,10 +144,10 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             targets = torch.from_numpy(targets).cuda(1)
             loss = criterion(outputs, targets)
             loss.backward()
-            #spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
-            #grad_queue.put(spare_grad.cpu().numpy())
+            spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
+            grad_queue.put(spare_grad.cpu().numpy())
             #print('before grad put')
-            grad_queue.put(rec_val.grad.cpu().half().numpy())
+            #grad_queue.put(rec_val.grad.cpu().half().numpy())
             #print('after grad put')
             if batch_idx == 0:
                 start_event.set()
