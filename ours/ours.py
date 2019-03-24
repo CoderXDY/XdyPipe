@@ -68,7 +68,7 @@ def dense(tensor, shape):
 ##quantize
 #################################################
 def quantize(input, num_bits=8, half=True, residual=None):
-    num_chunks = input.shape[0] if num_chunks is None else num_chunks
+    num_chunks = input.shape[0]
     B = input.shape[0]
     y = input.view(B // num_chunks, -1)
     min_value = y.min(-1)[0].mean(-1)
@@ -103,7 +103,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
         while True:
             try:
                 grad = grad_queue.get(block=True, timeout=1)
-                grad = torch.from_numpy(grad)
+                #grad = torch.from_numpy(grad)
                 #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
                 grad = torch.from_numpy(grad).cuda(0).float()
             except Empty as empty:
@@ -162,7 +162,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             #print('before grad put')
             #grad_queue.put(rec_val.grad.cpu().half().numpy())
             #print('after grad put')
-            quantize_grad = quantize(rec_val.grad)
+            quantize_grad = quantize(rec_val.grad, num_bits=args.bit)
             grad_queue.put(quantize_grad.cpu().numpy())
             if batch_idx == 0:
                 start_event.set()
@@ -237,8 +237,8 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
 
 
 def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, start_event):
-    logger = logging.getLogger('ours-rank-' + str(dist.get_rank()))
-    file_handler = logging.FileHandler('vgg-ours-rank-' + str(dist.get_rank()) + '.log')
+    logger = logging.getLogger(args.model + 'ours-rank-' + str(dist.get_rank()))
+    file_handler = logging.FileHandler(args.model + '-ours-rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
@@ -284,6 +284,7 @@ if __name__ == "__main__":
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
     parser.add_argument('-model', help='the path fo share file system')
     parser.add_argument('-buffer_size', type=int, help='size of batch', default=4)
+    parser.add_argument('-bit', type=int, help='the rank of process', default=8)
     args = parser.parse_args()
     print("ip: " + args.ip)
     print("size: " + str(args.size))

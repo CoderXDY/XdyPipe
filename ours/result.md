@@ -44,3 +44,11 @@ each_epoch:32s
 | pipeline | cifar10 | Res18 | tianhe*2 | 0.01 | 64 | ? | ? | ? | ? |  
 | ours | cifar10 | Res18 | tianhe*2 | 0.01 | 64 | ? | ? | ? | ? |      
 | ours + grad_compress | cifar10 | Res18 | tianhe*2 | 0.01 | 64 | ? | ? | ? | ? |
+
+
+### Grad Quantize ###
+
+
+| method | dataset | model | device | lr | batch_size | buffer_size | bit | epoch | acc | eachtime |  
+| ------ | ------ | ------ |  ------ | ------ | ------ | :------: | :-----: | :------: | :------: | :------: |
+| ours | cifar10 | Res18 | 2080*2 | 0.01 | 64 | 8/4 | 8 |183 | 91.38 | 12s |  
