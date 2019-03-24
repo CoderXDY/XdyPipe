@@ -67,7 +67,7 @@ def dense(tensor, shape):
 ################################################
 ##quantize
 #################################################
-def quantize(input, num_bits=8, half=True, dequantize=False, residual=None):
+def quantize(input, num_bits=8, half=True, residual=None):
     num_chunks = input.shape[0]
     B = input.shape[0]
     y = input.view(B // num_chunks, -1)
@@ -79,12 +79,21 @@ def quantize(input, num_bits=8, half=True, dequantize=False, residual=None):
     scale = max(scale, 1e-8)
     input.add_(-min_value).div_(scale).add_(qmin)
     input.clamp_(qmin, qmax).round_()
-    if dequantize:
-        input.add_(-qmin).mul_(scale).add_(min_value)
+    input = input.view(-1)
+    tensor = torch.cat([input, scale.view(1), min_value.view(1)])
     if half:
-        return input.half()
+        return tensor.half()
     else:
-        return input
+        return tensor
+def dequantize(input, shape):
+    if input.type() != 'torch.FloatTensor':
+        input = input.float()
+    min_value = input[-1]
+    scale = input[-2]
+    input = input[0: -2].view(shape)
+    qmin = 0.
+    input.add_(-qmin).mul_(scale).add_(min_value)
+    return input
 
 
 
@@ -106,8 +115,9 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
                 grad = grad_queue.get(block=True, timeout=1)
                 #grad = torch.from_numpy(grad)
                 #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
-                grad = torch.from_numpy(grad).cuda(0).float()
-                grad = quantize(grad, num_bits=8, half=False, dequantize=True)
+                #grad = torch.from_numpy(grad).cuda(0).float()
+                grad = torch.from_numpy(grad).cuda(0)
+                grad = dequantize(grad, [args.batch_size, 256, 4, 4])
             except Empty as empty:
                 print("backward empty.....")
                 break
@@ -164,7 +174,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             #print('before grad put')
             #grad_queue.put(rec_val.grad.cpu().half().numpy())
             #print('after grad put')
-            quantize_grad = quantize(rec_val.grad, num_bits=args.bit, half=True, dequantize=False)
+            quantize_grad = quantize(rec_val.grad, num_bits=args.bit, half=True)
             grad_queue.put(quantize_grad.cpu().numpy())
             if batch_idx == 0:
                 start_event.set()
