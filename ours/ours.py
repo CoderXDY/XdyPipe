@@ -67,7 +67,7 @@ def dense(tensor, shape):
 ################################################
 ##quantize
 #################################################
-def quantize(input, num_bits=8, half=True, residual=None):
+def quantize(input, num_bits=8, half=True, dequantize=False, residual=None):
     num_chunks = input.shape[0]
     B = input.shape[0]
     y = input.view(B // num_chunks, -1)
@@ -79,7 +79,8 @@ def quantize(input, num_bits=8, half=True, residual=None):
     scale = max(scale, 1e-8)
     input.add_(-min_value).div_(scale).add_(qmin)
     input.clamp_(qmin, qmax).round_()
-    input.add_(-qmin).mul_(scale).add_(min_value)
+    if dequantize:
+        input.add_(-qmin).mul_(scale).add_(min_value)
     if half:
         return input.half()
     else:
@@ -106,6 +107,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
                 #grad = torch.from_numpy(grad)
                 #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
                 grad = torch.from_numpy(grad).cuda(0).float()
+                grad = quantize(grad, num_bits=8, half=False, dequantize=True)
             except Empty as empty:
                 print("backward empty.....")
                 break
@@ -162,7 +164,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             #print('before grad put')
             #grad_queue.put(rec_val.grad.cpu().half().numpy())
             #print('after grad put')
-            quantize_grad = quantize(rec_val.grad, num_bits=args.bit)
+            quantize_grad = quantize(rec_val.grad, num_bits=args.bit, half=True, dequantize=False)
             grad_queue.put(quantize_grad.cpu().numpy())
             if batch_idx == 0:
                 start_event.set()
