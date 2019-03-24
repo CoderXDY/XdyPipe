@@ -31,8 +31,9 @@ import numpy as np
 
 
 
-
-
+############################################
+#top=n
+############################################
 
 def sparse2(tensor, k, half=True, residual=None):
 
@@ -51,16 +52,7 @@ def sparse2(tensor, k, half=True, residual=None):
 
     return sparse_tensor, residual
 
-
-
-
-
-
-
-
-
-
-def dense(tensor, shape):
+def dense(tensor, shape, stochastic=True):
     if tensor.type() != 'torch.FloatTensor':
         tensor = tensor.float()
     half_size = int(len(tensor) / 2)
@@ -70,9 +62,15 @@ def dense(tensor, shape):
     for i in range(len(shape)):
         length *= shape[i]
     sparse_tensor = torch.sparse.FloatTensor(indexs, values, torch.Size([length]))
-    return sparse_tensor.to_dense().view(shape)
+    output = sparse_tensor.to_dense().view(shape)
+    if stochastic:
+        noise = output.new(shape).uniform_(-0.5, 0.5)
+        output.add_(noise)
+    return output
 
-
+################################################
+##quantize
+#################################################
 
 
 
