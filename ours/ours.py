@@ -52,7 +52,7 @@ def sparse2(tensor, k, half=True, residual=None):
 
     return sparse_tensor, residual
 
-def dense(tensor, shape, stochastic=True):
+def dense(tensor, shape):
     if tensor.type() != 'torch.FloatTensor':
         tensor = tensor.float()
     half_size = int(len(tensor) / 2)
@@ -62,15 +62,30 @@ def dense(tensor, shape, stochastic=True):
     for i in range(len(shape)):
         length *= shape[i]
     sparse_tensor = torch.sparse.FloatTensor(indexs, values, torch.Size([length]))
-    output = sparse_tensor.to_dense().view(shape)
-    if stochastic:
-        noise = output.new(shape).uniform_(-0.5, 0.5)
-        output.add_(noise)
-    return output
+    return sparse_tensor.to_dense().view(shape)
 
 ################################################
 ##quantize
 #################################################
+def quantize(input, num_bits=8, half=True, residual=None):
+    num_chunks = input.shape[0] if num_chunks is None else num_chunks
+    B = input.shape[0]
+    y = input.view(B // num_chunks, -1)
+    min_value = y.min(-1)[0].mean(-1)
+    max_value = y.max(-1)[0].mean(-1)
+    qmin = 0.
+    qmax = 2. ** num_bits - 1.
+    scale = (max_value - min_value) / (qmax - qmin)
+    scale = max(scale, 1e-8)
+    input.add_(-min_value).div_(scale).add_(qmin)
+    input.clamp_(qmin, qmax).round_()
+    input.add_(-qmin).mul_(scale).add_(min_value)
+    if half:
+        return input.half()
+    else:
+        return input
+
+
 
 
 
@@ -89,8 +104,8 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             try:
                 grad = grad_queue.get(block=True, timeout=1)
                 grad = torch.from_numpy(grad)
-                grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
-                #grad = torch.from_numpy(grad).cuda(0).float()
+                #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
+                grad = torch.from_numpy(grad).cuda(0).float()
             except Empty as empty:
                 print("backward empty.....")
                 break
@@ -142,11 +157,13 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             targets = torch.from_numpy(targets).cuda(1)
             loss = criterion(outputs, targets)
             loss.backward()
-            spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
-            grad_queue.put(spare_grad.cpu().numpy())
+            #spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
+            #grad_queue.put(spare_grad.cpu().numpy())
             #print('before grad put')
             #grad_queue.put(rec_val.grad.cpu().half().numpy())
             #print('after grad put')
+            quantize_grad = quantize(rec_val.grad)
+            grad_queue.put(quantize_grad.cpu().numpy())
             if batch_idx == 0:
                 start_event.set()
             if batch_idx % args.buffer_size == 0:
