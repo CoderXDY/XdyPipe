@@ -80,10 +80,10 @@ def quantize(input, num_bits=8, half=True, residual=None):
     input.add_(-min_value).div_(scale).add_(qmin)
     input.clamp_(qmin, qmax).round_()
     input = input.view(-1)
-    max_sign = 1 if max_value > 0 else 0
-    min_sign = 1 if min_value > 0 else 0
-    tensor = torch.cat([input, (max_value*10000).view(1), max_sign.view(1),
-                        (min_value*10000).view(1), min_sign.view(1)])
+    max_sign = torch.ones([1]) if max_value > 0 else torch.zeros([1])
+    min_sign = torch.ones([1]) if min_value > 0 else torch.zeros([1])
+    tensor = torch.cat([input, (max_value*10000).view(1), max_sign,
+                        (min_value*10000).view(1), min_sign])
     return tensor.byte()
     # tensor = torch.cat([input, scale.view(1), min_value.view(1)])
     # if half:
