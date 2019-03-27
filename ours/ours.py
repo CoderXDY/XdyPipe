@@ -127,14 +127,16 @@ def quantize(input, num_bits=8, byte=True, residual=None):
     scale = max(scale, 1e-8)
     input.add_(-min_value).div_(scale).add_(qmin)
     input.clamp_(qmin, qmax).round_()
-    input = input.view(-1)
+    input = input.view(-1).cpu()
+    scale = scale.cpu()
+    min_value = min_value.cpu()
     if byte:
-        return input.byte(), scale, min_value
-    else:
-        return tensor, scale, min_value
+        input = input.byte()
+    return input.numpy(), scale.numpy(), min_value.numpy()
 
 def dequantize(tuple, shape, num_bits=8):
-    tensor, scale, min_value = tuple[0].view(shape), tuple[1], tuple[2]
+    tensor, scale, min_value = torch.from_numpy(tuple[0]).view(shape), \
+                               torch.from_numpy(tuple[1]), torch.from_numpy(tuple[2])
     qmin = 0.
     tensor = tensor.float() if tensor.type() == 'torch.ByteTensor' else tensor
     tensor.add_(-qmin).mul_(scale).add_(min_value)
@@ -161,12 +163,15 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
         batch_idx = 0
         while True:
             try:
-                grad = grad_queue.get(block=True, timeout=1)
+                quantize_package = grad_queue.get(block=True, timeout=1)
+                grad = dequantize(quantize_package, [args.batch_size, 256, 4, 4])
+                grad = grad.cuda()
                 #grad = torch.from_numpy(grad)
                 #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
                 #grad = torch.from_numpy(grad).cuda(0).float()
-                grad = torch.from_numpy(grad).cuda(0)
-                grad = dequantize(grad, [args.batch_size, 256, 4, 4])
+                #grad = torch.from_numpy(grad).cuda(0)
+                #grad = dequantize(grad, [args.batch_size, 256, 4, 4])
+
             except Empty as empty:
                 print("backward empty.....")
                 break
@@ -225,6 +230,8 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             #print('after grad put')
             #quantize_grad = quantize(rec_val.grad, num_bits=args.bit, half=True)
             #grad_queue.put(quantize_grad.cpu().numpy())
+            quantize_package = quantize(rec_val.grad, num_bits=args.bit, byte=True)
+            grad_queue.put(quantize_package)
             if batch_idx == 0:
                 start_event.set()
             if batch_idx % args.buffer_size == 0:
