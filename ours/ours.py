@@ -78,7 +78,7 @@ def quantize(input, num_bits=8, half=True, residual=None):
     max_val = torch.max(input_abs)
     input = torch.round(input_abs.mul(scale).div(max_val)).mul_(sign)
     input = input.view(-1)
-    tensor = torch.cat([input, sum.view(1)])
+    tensor = torch.cat([input, torch.tensor(sum).view(1)])
     if half:
         return tensor.char()
     else:
