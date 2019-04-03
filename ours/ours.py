@@ -80,6 +80,7 @@ def quantize(input, num_bits=8, half=True, residual=None):
     scale = max(scale, 1e-8)
     input.add_(-min_value).div_(scale).add_(qmin)
     input.clamp_(qmin, qmax).round_()
+    input = torch.mean(input, dim=0, keepdim=True)
     input = input.view(-1)
 
     # max_sign = torch.ones([1]) if max_value > 0 else torch.zeros([1])
