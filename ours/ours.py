@@ -78,11 +78,8 @@ def quantize(input, num_bits=8, half=True, residual=None):
     max_val = torch.max(input_abs)
     input = torch.round(input_abs.mul(scale).div(max_val)).mul_(sign)
     input = input.view(-1)
-    tensor = torch.cat([input, torch.tensor(sum).view(1)])
-    if half:
-        return tensor.char()
-    else:
-        return tensor
+    tensor = torch.cat([input, torch.tensor(sum).cuda().view(1)])
+    return tensor
 
     #b = torch.abs(a)
     #c = torch.max(b)
@@ -194,7 +191,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             #quantize_package = quantize(rec_val.grad, num_bits=args.bit, byte=True)
             #grad_queue.put(quantize_package)
             quantize_grad = quantize(rec_val.grad)
-            grad_queue.put(quantize_grad.cpu().numpy())
+            grad_queue.put(quantize_grad.cpu().numpy().astype(np.int8))
             if batch_idx == 0:
                 start_event.set()
             if batch_idx % args.buffer_size == 0:
