@@ -193,3 +193,38 @@ def dequantize(input, shape, num_bits=8):
     scale = qmax - qmin
     input.mul_(max_val).div_(scale)
     return input
+
+
+"""
+根据上面的模式增加均值共同属性来生成max_val用于反量化
+"""
+def quantize(input, num_bits=8, half=True, residual=None):
+    sign = input.sign()
+    qmin = 0.
+    qmax = 2. ** (num_bits - 1) - 1.
+    sum = max(input.sum(), qmax)
+    scale = qmax - qmin
+    input_abs = torch.abs(input)
+    max_val = torch.max(input_abs)
+    input = torch.round(input_abs.mul(scale).div(max_val)).mul_(sign)
+    input = input.view(-1)
+    tensor = torch.cat([input, torch.tensor(sum).cuda().view(1)])
+    return tensor
+
+    #b = torch.abs(a)
+    #c = torch.max(b)
+    #torch.round(torch.abs(a).mul(255).div(c))
+
+def dequantize(input, shape, num_bits=8):
+    if input.type() != 'torch.FloatTensor':
+        input = input.float()
+    sum = input[-1]
+    input = input[0: -1].view(shape)
+    input_sum = input.sum()
+    qmin = 0.
+    qmax = 2. ** (num_bits - 1) - 1.
+    scale = qmax - qmin
+    prop = sum.div(input_sum)
+    max_val = qmax / prop
+    input.mul_(max_val).div_(scale)
+    return input

@@ -72,13 +72,12 @@ def quantize(input, num_bits=8, half=True, residual=None):
     sign = input.sign()
     qmin = 0.
     qmax = 2. ** (num_bits - 1) - 1.
-    sum = max(input.sum(), qmax)
     scale = qmax - qmin
     input_abs = torch.abs(input)
-    max_val = torch.max(input_abs)
+    max_val = torch.round(torch.max(input_abs))
     input = torch.round(input_abs.mul(scale).div(max_val)).mul_(sign)
     input = input.view(-1)
-    tensor = torch.cat([input, torch.tensor(sum).cuda().view(1)])
+    tensor = torch.cat([input, max_val.view(1)])
     return tensor
 
     #b = torch.abs(a)
@@ -88,14 +87,11 @@ def quantize(input, num_bits=8, half=True, residual=None):
 def dequantize(input, shape, num_bits=8):
     if input.type() != 'torch.FloatTensor':
         input = input.float()
-    sum = input[-1]
+    max_val = input[-1]
     input = input[0: -1].view(shape)
-    input_sum = input.sum()
     qmin = 0.
     qmax = 2. ** (num_bits - 1) - 1.
     scale = qmax - qmin
-    prop = sum.div(input_sum)
-    max_val = qmax / prop
     input.mul_(max_val).div_(scale)
     return input
 
@@ -126,7 +122,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
                 #grad = torch.from_numpy(grad)
                 #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
                 #grad = torch.from_numpy(grad).cuda(0).float()
-                grad = torch.from_numpy(grad).cuda(0)
+                grad = torch.from_numpy(grad.astype(np.float32)).cuda(0)
                 #grad = dequantize(grad, [args.batch_size, 256, 4, 4])
                 grad = dequantize(grad, [args.batch_size, 256, 4, 4])
 
