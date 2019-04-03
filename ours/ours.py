@@ -72,14 +72,15 @@ def quantize(input, num_bits=8, half=True, residual=None):
     sign = input.sign()
     qmin = 0.
     qmax = 2. ** (num_bits - 1) - 1.
+    sum = max(input.sum(), qmax)
     scale = qmax - qmin
     input_abs = torch.abs(input)
     max_val = torch.max(input_abs)
     input = torch.round(input_abs.mul(scale).div(max_val)).mul_(sign)
     input = input.view(-1)
-    tensor = torch.cat([input, max_val(1)])
+    tensor = torch.cat([input, sum.view(1)])
     if half:
-        return tensor.half()
+        return tensor.char()
     else:
         return tensor
 
@@ -90,11 +91,14 @@ def quantize(input, num_bits=8, half=True, residual=None):
 def dequantize(input, shape, num_bits=8):
     if input.type() != 'torch.FloatTensor':
         input = input.float()
-    max_val = input[-1]
+    sum = input[-1]
     input = input[0: -1].view(shape)
+    input_sum = input.sum()
     qmin = 0.
     qmax = 2. ** (num_bits - 1) - 1.
     scale = qmax - qmin
+    prop = sum.div(input_sum)
+    max_val = qmax / prop
     input.mul_(max_val).div_(scale)
     return input
 
