@@ -228,3 +228,30 @@ def dequantize(input, shape, num_bits=8):
     max_val = qmax / prop
     input.mul_(max_val).div_(scale)
     return input
+
+
+a = torch.randn([3,2,2])
+s = a.sign()
+a_abs = a.abs()
+a_mean = a_abs.mean()
+scale = a_mean.div(2**6)
+x = torch.round((a_abs - a_mean).mul(2**6).div(a_mean).add(2**6))
+
+print("prop: " + str(x.var() / a.var()))
+#a_copy = a_abs.clone()
+#a_copy[a_copy >= a_mean] = torch.round((a_copy - a_mean).mul(2**6).div(a_mean).add(2**6))
+#a_max = torch.max(a_abs)
+#z = torch.round(a_abs.mul(127).div(a_max))
+
+
+
+
+a = torch.randn([3,2,2])
+s = a.sign()
+a_max = torch.max(torch.abs(a).div(a.sum()))
+x = torch.round(a.mul(255).div(a_max)).mul(s)
+
+x_max = torch.max(torch.abs(x).div(x.sum()))
+
+y = x.mul(x_max).div(255)
+
