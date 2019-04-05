@@ -68,23 +68,12 @@ def dense(tensor, shape):
 ##quantize
 #################################################
 
-def quantize(input, num_bits=8, residual=None):
-    residual = torch.zeros(input.size()).cuda(1) if residual is None else residual
-    sign = input.sign()
+def quantize(input, num_bits=8, half=True, residual=None):
     qmin = 0.
     qmax = 2. ** (num_bits - 1) - 1.
     scale = qmax - qmin
-    input.add_(residual)
-    input_abs = torch.abs(input)
-    max_val = torch.max(input_abs) if (torch.max(input_abs) * 10000) < qmax else torch.tensor(qmax / 10000).cuda(1)
-    input = torch.round(input_abs.mul(scale).div(max_val)).mul_(sign)
-    #calculate the residual
-    de_input = input.mul(max_val).div(scale)
-    residual = input - de_input
-
-    input = input.view(-1)
-    tensor = torch.cat([input, max_val.mul(10000).view(1)])
-    return tensor, residual
+    input = torch.round(input.mul(scale).mul(1000))
+    return input
 
     #b = torch.abs(a)
     #c = torch.max(b)
@@ -93,12 +82,10 @@ def quantize(input, num_bits=8, residual=None):
 def dequantize(input, shape, num_bits=8):
     if input.type() != 'torch.FloatTensor':
         input = input.float()
-    max_val = input[-1].div(10000)
-    input = input[0: -1].view(shape)
     qmin = 0.
     qmax = 2. ** (num_bits - 1) - 1.
     scale = qmax - qmin
-    input.mul_(max_val).div_(scale)
+    input.div_(1000 * scale)
     return input
 
 
@@ -192,7 +179,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             #grad_queue.put(quantize_grad.cpu().numpy())
             #quantize_package = quantize(rec_val.grad, num_bits=args.bit, byte=True)
             #grad_queue.put(quantize_package)
-            quantize_grad, residual = quantize(rec_val.grad, residual=residual)
+            quantize_grad = quantize(rec_val.grad)
             grad_queue.put(quantize_grad.cpu().numpy().astype(np.int8))
             if batch_idx == 0:
                 start_event.set()
