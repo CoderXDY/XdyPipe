@@ -74,10 +74,11 @@ def quantize(input, num_bits=8, half=True, residual=None):
     qmax = 2. ** (num_bits - 1) - 1.
     scale = qmax - qmin
     input_abs = torch.abs(input)
-    max_val = torch.max(input_abs)
+    max_val = torch.max(input_abs) if (max_val * 10000) < qmax else torch.tensor(qmax / 10000)
+    print("max_val:" + str(max_val))
     input = torch.round(input_abs.mul(scale).div(max_val)).mul_(sign)
     input = input.view(-1)
-    tensor = torch.cat([input, max_val.view(1)])
+    tensor = torch.cat([input, max_val.mul(10000).view(1)])
     return tensor
 
     #b = torch.abs(a)
@@ -87,7 +88,7 @@ def quantize(input, num_bits=8, half=True, residual=None):
 def dequantize(input, shape, num_bits=8):
     if input.type() != 'torch.FloatTensor':
         input = input.float()
-    max_val = input[-1]
+    max_val = input[-1].div(10000)
     input = input[0: -1].view(shape)
     qmin = 0.
     qmax = 2. ** (num_bits - 1) - 1.
