@@ -165,6 +165,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             except RuntimeError as error:
                 e.wait()
                 break
+            rec_val = dequantize(rec_val)
             rec_val = rec_val.cuda(1)
             rec_val.requires_grad_()
             outputs = layer(rec_val)
