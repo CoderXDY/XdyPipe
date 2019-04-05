@@ -81,7 +81,7 @@ def quantize(input, num_bits=8, char=False, residual=None):
     #c = torch.max(b)
     #torch.round(torch.abs(a).mul(255).div(c))
 
-def dequantize(input, shape, num_bits=8):
+def dequantize(input, num_bits=8):
     if input.type() != 'torch.FloatTensor':
         input = input.float()
     qmin = 0.
@@ -119,7 +119,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
                 #grad = torch.from_numpy(grad).cuda(0).float()
                 grad = torch.from_numpy(grad.astype(np.float32)).cuda(0)
                 #grad = dequantize(grad, [args.batch_size, 256, 4, 4])
-                grad = dequantize(grad, [args.batch_size, 256, 4, 4])
+                grad = dequantize(grad)
 
             except Empty as empty:
                 print("backward empty.....")
