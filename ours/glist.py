@@ -285,3 +285,63 @@ def dequantize(input, shape, num_bits=8):
     input.mul_(max_val).div_(scale)
     return input
 
+
+
+### final version beata has error feeback ,but ....
+def quantize(input, num_bits=8, residual=None):
+    residual = torch.zeros(input.size()).cuda(1) if residual is None else residual
+    sign = input.sign()
+    qmin = 0.
+    qmax = 2. ** (num_bits - 1) - 1.
+    scale = qmax - qmin
+    input.add_(residual)
+    input_abs = torch.abs(input)
+    max_val = torch.max(input_abs) if (torch.max(input_abs) * 10000) < qmax else torch.tensor(qmax / 10000).cuda(1)
+    input = torch.round(input_abs.mul(scale).div(max_val)).mul_(sign)
+    #calculate the residual
+    de_input = input.mul(max_val).div(scale)
+    residual = input - de_input
+
+    input = input.view(-1)
+    tensor = torch.cat([input, max_val.mul(10000).view(1)])
+    return tensor, residual
+
+    #b = torch.abs(a)
+    #c = torch.max(b)
+    #torch.round(torch.abs(a).mul(255).div(c))
+
+def dequantize(input, shape, num_bits=8):
+    if input.type() != 'torch.FloatTensor':
+        input = input.float()
+    max_val = input[-1].div(10000)
+    input = input[0: -1].view(shape)
+    qmin = 0.
+    qmax = 2. ** (num_bits - 1) - 1.
+    scale = qmax - qmin
+    input.mul_(max_val).div_(scale)
+    return input
+
+
+
+a = torch.randn([3,2,2])
+s = a.sign()
+b = torch.abs(a)
+c = torch.max(b)
+d = torch.round(b.mul(255).div(c)).mul(s)
+a_d = a.div(c)
+
+d_m = torch.max(torch.abs(d))
+d_d = d.div(d_m)
+
+print(a_d)
+print("----")
+print(d_d)
+
+########################
+a = torch.randn([3,2,2])
+print(a)
+
+q = torch.round(a.mul(255).mul(1000))
+print("-----------")
+dq = q.div(1000 * 255)
+print(dq)
