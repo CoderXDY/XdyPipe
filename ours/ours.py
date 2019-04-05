@@ -79,8 +79,8 @@ def quantize(input, num_bits=8, residual=None):
     max_val = torch.max(input_abs) if (torch.max(input_abs) * 10000) < qmax else torch.tensor(qmax / 10000).cuda(1)
     input = torch.round(input_abs.mul(scale).div(max_val)).mul_(sign)
     #calculate the residual
-    de_input = input.mul(max_val).div(qmax - qmin)
-    residual = de_input - input
+    de_input = input.mul(max_val).div(scale)
+    residual = input - de_input
 
     input = input.view(-1)
     tensor = torch.cat([input, max_val.mul(10000).view(1)])
