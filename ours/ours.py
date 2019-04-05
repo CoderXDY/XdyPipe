@@ -74,7 +74,7 @@ def quantize(input, num_bits=8, half=True, residual=None):
     qmax = 2. ** (num_bits - 1) - 1.
     scale = qmax - qmin
     input_abs = torch.abs(input)
-    max_val = torch.max(input_abs) if (torch.max(input_abs) * 10000) < qmax else torch.tensor(qmax / 10000).cuda()
+    max_val = torch.max(input_abs) if (torch.max(input_abs) * 10000) < qmax else torch.tensor(qmax / 10000).cuda(1)
     input = torch.round(input_abs.mul(scale).div(max_val)).mul_(sign)
     input = input.view(-1)
     tensor = torch.cat([input, max_val.mul(10000).view(1)])
