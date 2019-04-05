@@ -52,3 +52,4 @@ each_epoch:32s
 | method | dataset | model | device | lr | batch_size | buffer_size | bit | epoch | acc | eachtime |  
 | ------ | ------ | ------ |  ------ | ------ | ------ | :------: | :-----: | :------: | :------: | :------: |
 | ours | cifar10 | Res18 | 2080*2 | 0.01 | 64 | 8/4 | 8 |183 | 91.38 | 12s |  
+| ours quantied | cifar10 | vgg16 | 2080*2 | 0.01 | 64 | 8/4 | 8 |171 | 91.36 | 7s | 

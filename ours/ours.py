@@ -69,7 +69,7 @@ def dense(tensor, shape):
 #################################################
 
 def quantize(input, num_bits=8, residual=None):
-    residual = torch.zeros(input.shape()) if residual is None else residual
+    residual = torch.zeros(input.size()) if residual is None else residual
     sign = input.sign()
     qmin = 0.
     qmax = 2. ** (num_bits - 1) - 1.
