@@ -68,11 +68,13 @@ def dense(tensor, shape):
 ##quantize
 #################################################
 
-def quantize(input, num_bits=8, half=True, residual=None):
+def quantize(input, num_bits=8, char=False, residual=None):
     qmin = 0.
     qmax = 2. ** (num_bits - 1) - 1.
     scale = qmax - qmin
     input = torch.round(input.mul(scale).mul(1000))
+    if char:
+        input = input.char()
     return input
 
     #b = torch.abs(a)
@@ -139,7 +141,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             print("batch: " + str(batch_idx))
             inputs, targets = inputs.cuda(0), targets
             outputs = layer(inputs)
-            send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
+            send_opt = dist.isend(tensor=quantize(outputs,char=True).cpu(), dst=1)
             # if batch_idx < 30:
             send_opt.wait()
             targets_queue.put(targets.numpy())
@@ -158,7 +160,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
         residual = None
         while True:
             try:
-                rec_val = torch.zeros([args.batch_size, 256, 4, 4])
+                rec_val = torch.zeros([args.batch_size, 256, 4, 4], dtype=torch.int8)
                 dist.recv(tensor=rec_val, src=0)
             except RuntimeError as error:
                 e.wait()
@@ -199,6 +201,8 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             logger.error("train:" + str(train_loss / (batch_idx + 1)))
 
             batch_idx += 1
+            acc_str = "tacc: %.3f" % (100. * correct / total,)
+        logger.error(acc_str)
 
 def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
     criterion = nn.CrossEntropyLoss()
@@ -250,6 +254,8 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                 #if batch_idx % 10 == 0:
                 logger.error("eval:" + str(test_loss / (batch_idx + 1)))
                 batch_idx += 1
+            acc_str = "eacc: %.3f" % (100. * correct / total,)
+            logger.error(acc_str)
 
 
 
