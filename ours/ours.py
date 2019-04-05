@@ -68,11 +68,11 @@ def dense(tensor, shape):
 ##quantize
 #################################################
 
-def quantize(input, num_bits=8, char=False, residual=None):
+def quantize(input, num_bits=8, char=False, prop=1000):
     qmin = 0.
     qmax = 2. ** (num_bits - 1) - 1.
     scale = qmax - qmin
-    input = torch.round(input.mul(scale).mul(1000))
+    input = torch.round(input.mul(scale).mul(prop))
     if char:
         input = input.char()
     return input
@@ -81,13 +81,13 @@ def quantize(input, num_bits=8, char=False, residual=None):
     #c = torch.max(b)
     #torch.round(torch.abs(a).mul(255).div(c))
 
-def dequantize(input, num_bits=8):
+def dequantize(input, num_bits=8, prop=1000):
     if input.type() != 'torch.FloatTensor':
         input = input.float()
     qmin = 0.
     qmax = 2. ** (num_bits - 1) - 1.
     scale = qmax - qmin
-    input.div_(1000 * scale)
+    input.div_(prop * scale)
     return input
 
 
@@ -141,7 +141,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             print("batch: " + str(batch_idx))
             inputs, targets = inputs.cuda(0), targets
             outputs = layer(inputs)
-            send_opt = dist.isend(tensor=quantize(outputs,char=True).cpu(), dst=1)
+            send_opt = dist.isend(tensor=quantize(outputs, char=True, prop=100).cpu(), dst=1)
             # if batch_idx < 30:
             send_opt.wait()
             targets_queue.put(targets.numpy())
@@ -165,7 +165,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             except RuntimeError as error:
                 e.wait()
                 break
-            rec_val = dequantize(rec_val)
+            rec_val = dequantize(rec_val, prop=100)
             rec_val = rec_val.cuda(1)
             rec_val.requires_grad_()
             outputs = layer(rec_val)
