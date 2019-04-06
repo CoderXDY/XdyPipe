@@ -99,7 +99,11 @@ def q_act(input, num_bits=8, char=False):
         input = input.char()
     return input
 
-
+def dq_act(input, min=-0.0020, max=0.0020):
+    input = input.float()
+    noise = torch.new(input.size()).uniform_(min, max)
+    input.add_(noise)
+    return input
 
 
 
@@ -171,7 +175,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             except RuntimeError as error:
                 e.wait()
                 break
-            rec_val = rec_val.float()
+            rec_val = dq_act(rec_val)
             rec_val = rec_val.cuda(1)
             rec_val.requires_grad_()
             outputs = layer(rec_val)
