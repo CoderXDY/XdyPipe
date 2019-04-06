@@ -92,6 +92,12 @@ def dequantize(input, num_bits=8, prop=1000):
 
 
 
+def q_act(input, num_bits=8, char=False):
+    qmax = 2. ** num_bits - 1.
+    input = torch.round(input.mul(qmax)).div(qmax)
+    if char:
+        input = input.char()
+    return input
 
 
 
@@ -141,7 +147,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             print("batch: " + str(batch_idx))
             inputs, targets = inputs.cuda(0), targets
             outputs = layer(inputs)
-            send_opt = dist.isend(tensor=quantize(outputs, char=True, prop=100).cpu(), dst=1)
+            send_opt = dist.isend(tensor=q_act(outputs, char=True).cpu(), dst=1)
             # if batch_idx < 30:
             send_opt.wait()
             targets_queue.put(targets.numpy())
@@ -165,7 +171,7 @@ def train(layer, logger, args, grad_queue, targets_queue, e, data_size, trainloa
             except RuntimeError as error:
                 e.wait()
                 break
-            rec_val = dequantize(rec_val, prop=100)
+            rec_val = rec_val.float()
             rec_val = rec_val.cuda(1)
             rec_val.requires_grad_()
             outputs = layer(rec_val)
