@@ -227,7 +227,7 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                 inputs, targets = inputs.cuda(0), targets
                 outputs = layer(inputs)
                 targets_queue.put(targets.numpy())
-                send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
+                send_opt = dist.isend(tensor=q_act(outputs, char=True).cpu(), dst=1)
                 send_opt.wait()
             send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
             send_opt.wait()
@@ -241,7 +241,7 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
             global best_acc
             while True:
                 try:
-                    rec_val = torch.zeros([100, 256, 4, 4])
+                    rec_val = torch.zeros([100, 256, 4, 4], dtype=torch.int8)
                     dist.recv(tensor=rec_val, src=0)
                 except RuntimeError as error:
                     print("done....")
@@ -251,6 +251,7 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                         save_event.set()
                     e.set()
                     break
+                rec_val = dq_act(rec_val)
                 outputs = layer(rec_val.cuda(1))
                 targets = targets_queue.get(block=True, timeout=2)
                 targets = torch.from_numpy(targets).cuda(1)
