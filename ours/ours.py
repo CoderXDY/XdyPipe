@@ -101,7 +101,7 @@ def q_act(input, num_bits=8, char=False):
 
 def dq_act(input, min=-0.0020, max=0.0020):
     input = input.float()
-    noise = torch.new(input.size()).uniform_(min, max)
+    noise = input.new(input.size()).uniform_(min, max)
     input.add_(noise)
     return input
 
