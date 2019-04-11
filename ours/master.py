@@ -44,6 +44,7 @@ if __name__ == "__main__":
     parser.add_argument('-ip', help='the ip of manager server', default='89.72.2.41')
     parser.add_argument('-path', help='the path of share system')
     parser.add_argument('-buffer', type=int, help='the size of queue', default=2)
+    parser.add_argument('-port', type=int, help='the port of server',default=5000)
     args = parser.parse_args()
     if os.path.exists(args.path):
         os.remove(args.path)
@@ -59,7 +60,7 @@ if __name__ == "__main__":
     bm.register('get_backward_event', callable=lambda: backward_event)
     bm.register('get_start_thread_event', callable=lambda: start_event)
     bm.register('get_start_thread_event2', callable=lambda: start_event2)
-    m = bm(address=(args.ip, 5002), authkey=b'xpipe')
+    m = bm(address=(args.ip, args.port), authkey=b'xpipe')
     m.start()
     g_e = m.get_global_event()
     print("master run......")
