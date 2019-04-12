@@ -216,7 +216,8 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
                              % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
             #if batch_idx % 10 == 0:
             logger.error("train:" + str(train_loss / (batch_idx + 1)))
-
+            acc_str = "tacc: %.3f" % (100. * correct / total,)
+            logger.error(acc_str)
             batch_idx += 1
 
 def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
@@ -283,6 +284,8 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                              % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
                 #if batch_idx % 10 == 0:
                 logger.error("eval:" + str(test_loss / (batch_idx + 1)))
+                acc_str = "eacc: %.3f" % (100. * correct / total,)
+                logger.error(acc_str)
                 batch_idx += 1
 
 
@@ -332,10 +335,11 @@ if __name__ == "__main__":
     parser.add_argument('-rank', type=int, help='the rank of process')
     parser.add_argument('-batch_size', type=int, help='size of batch', default=64)
     parser.add_argument('-data_worker', type=int, help='the number of dataloader worker', default=2)
-    parser.add_argument('-epoch', type=int)
+    parser.add_argument('-epoch', type=int, default=0)
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
     parser.add_argument('-model', help='the path fo share file system')
     parser.add_argument('-buffer_size', type=int, help='size of batch', default=4)
+    parser.add_argument('-port', type=int, default=5000)
     args = parser.parse_args()
     print("ip: " + args.ip)
     print("size: " + str(args.size))
@@ -344,7 +348,7 @@ if __name__ == "__main__":
     print("batch_size: " + str(args.batch_size))
     print("data_worker: " + str(args.data_worker))
     print("model: " + str(args.model))
-
+    print("port: " + str(args.port))
     #torch.manual_seed(1)
 
     bm.register('get_epoch_event')
@@ -356,7 +360,7 @@ if __name__ == "__main__":
     bm.register('get_backward_event')
     bm.register('get_start_thread_event')
     bm.register('get_start_thread_event2')
-    m = bm(address=(args.ip, 5002), authkey=b'xpipe')
+    m = bm(address=(args.ip, args.port), authkey=b'xpipe')
     m.connect()
     global_event = m.get_global_event()
     epoch_event = m.get_epoch_event()
@@ -426,6 +430,7 @@ if __name__ == "__main__":
         trainloader = None
         testloader = None
 
-    
+    if args.epoch != 0:
+        start_epoch = args.epoch
     run(start_epoch, layer, args, grad_queue, grad_queue2, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, start_event, start_event2)
 

@@ -320,6 +320,7 @@ if __name__ == "__main__":
         trainloader = None
         testloader = None
 
-    if args.epoch
+    if args.epoch != 0:
+        start_epoch = args.epoch
     run(start_epoch, layer, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader)
 
