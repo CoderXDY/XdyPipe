@@ -53,3 +53,13 @@ each_epoch:32s
 | ------ | ------ | ------ |  ------ | ------ | ------ | :------: | :-----: | :------: | :------: | :------: |
 | ours | cifar10 | Res18 | 2080*2 | 0.01 | 64 | 8/4 | 8 |183 | 91.38 | 12s |  
 | ours quantied | cifar10 | vgg16 | 2080*2 | 0.01 | 64 | 8/4 | 8 |171 | 91.36 | 7s | 
+
+
+
+### Final Experiment  part 2 :   ###
+| method | dataset | model | device | lr | batch_size | buffer_size | epoch | acc | eachtime |  
+| ------ | ------ | ------ |  ------ | ------ | ------ | :------: | :------: | :------: | :------: |
+| normal | cifar10 | VggNet19 | tian*3 | 0.01 | 64 | 2 | 124 | 91.01 | ~2min |  
+| normal | cifar10 | ResNet101 | tianhe*3 | 0.01 | 64 | 2 | ? | ? | ? |  
+| normal | cifar10 | GoogleNet | tianhe*3 | 0.01 | 64 | 2 | ? | ? | ? |  
+| normal | cifar10 | DPN92 | tianhe*3 | 0.01 | 64 | 2 | ? | ? | ? | ? |

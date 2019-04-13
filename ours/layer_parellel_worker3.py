@@ -14,6 +14,7 @@ import time
 from model.res import THResNet101Group0, THResNet101Group2, THResNet101Group1
 from model.vgg_module import VggLayer
 from model.googlenet import GoogleNetGroup0, GoogleNetGroup1, GoogleNetGroup2
+from model.dpn import  THDPNGroup0, THDPNGroup1, THDPNGroup2
 import torchvision
 import torchvision.transforms as transforms
 from utils import progress_bar
@@ -47,7 +48,7 @@ def model_par_train(layer, logger, args, targets_queue, e, data_size, trainloade
             targets_queue.put(targets.numpy())
             dist.send(tensor=outputs.cpu(), dst=1)
             print("send to rank 1....")
-            grad = torch.zeros([args.batch_size, 480, 16, 16])# difference model has difference shape
+            grad = torch.zeros([args.batch_size, 672, 16, 16])# difference model has difference shape
             dist.recv(tensor=grad, src=1)
             outputs.backward(grad.cuda(0))
             optimizer.step()
@@ -59,7 +60,7 @@ def model_par_train(layer, logger, args, targets_queue, e, data_size, trainloade
         batch_idx = 0
         while True:
             try:
-                rec_val = torch.zeros([args.batch_size, 480, 16, 16])  # difference model has difference shape
+                rec_val = torch.zeros([args.batch_size, 672, 16, 16])  # difference model has difference shape
                 dist.recv(tensor=rec_val, src=0)
             except RuntimeError as error:
                 send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
@@ -71,7 +72,7 @@ def model_par_train(layer, logger, args, targets_queue, e, data_size, trainloade
             outputs = layer(rec_val)
             send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
             send_opt.wait()
-            grad = torch.zeros([args.batch_size, 832, 8, 8])  # difference model has difference shape
+            grad = torch.zeros([args.batch_size, 1528, 8, 8])  # difference model has difference shape
             dist.recv(tensor=grad, src=2)
             outputs.backward(grad.cuda())
             send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=0)
@@ -85,7 +86,7 @@ def model_par_train(layer, logger, args, targets_queue, e, data_size, trainloade
         total = 0
         while True:
             try:
-                rec_val = torch.zeros([args.batch_size, 832, 8, 8]) # difference model has difference shape
+                rec_val = torch.zeros([args.batch_size, 1528, 8, 8]) # difference model has difference shape
                 dist.recv(tensor=rec_val, src=1)
             except RuntimeError as error:
                 print(" done....")
@@ -137,7 +138,7 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
             batch_idx = 0
             while True:
                 try:
-                    rec_val = torch.zeros([100, 480, 16, 16])  # difference model has difference shape
+                    rec_val = torch.zeros([100, 672, 16, 16])  # difference model has difference shape
                     dist.recv(tensor=rec_val, src=0)
                 except RuntimeError as error:
                     send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
@@ -158,7 +159,7 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
             global best_acc
             while True:
                 try:
-                    rec_val = torch.zeros([100, 832, 8, 8]) #difference model has difference shape
+                    rec_val = torch.zeros([100, 1528, 8, 8]) #difference model has difference shape
                     dist.recv(tensor=rec_val, src=1)
                 except RuntimeError as error:
                     print("done....")
@@ -258,20 +259,28 @@ if __name__ == "__main__":
     targets_queue = m.get_targets_queue()
     save_event = m.get_save_event()
 
-
+    node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M']
+    node_cfg_1 = [512, 512, 512, 512, 'M']
+    node_cfg_2 = [512, 512, 512, 512, 'M']
 
 
     if args.rank == 0:
         #layer = THResNet101Group0()
-        layer = GoogleNetGroup0()
+        #layer = GoogleNetGroup0()
+        #layer = VggLayer(node_cfg_0)
+        layer = THDPNGroup0()
         layer.cuda()
     elif args.rank == 1:
         #layer = THResNet101Group1()
-        layer = GoogleNetGroup1()
+        #layer = GoogleNetGroup1()
+        #layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
+        layer = THDPNGroup1()
         layer.cuda()
     elif args.rank == 2:
         #layer = THResNet101Group2()
-        layer = GoogleNetGroup2()
+        #layer = GoogleNetGroup2()
+        #layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2], last_flag=True)
+        layer = THDPNGroup2()
         layer.cuda()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 

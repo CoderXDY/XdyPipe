@@ -243,9 +243,14 @@ class THResNet101Group2(nn.Module):
 
 
 
+"""
+
+group 0:torch.Size([1, 512, 16, 16])
+group 1: torch.Size([1, 1024, 8, 8])
+torch.Size([1, 10])
 
 
-
+"""
 if __name__ == '__main__':
     group0 = THResNet101Group0()
     group1 = THResNet101Group1()
