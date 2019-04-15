@@ -13,6 +13,8 @@ import logging
 import time
 from model.res import THResNet101Group0, THResNet101Group2, THResNet101Group1
 from model.vgg_module import VggLayer
+from model.googlenet import GoogleNetGroup0, GoogleNetGroup1, GoogleNetGroup2
+from model.dpn import  THDPNGroup0, THDPNGroup1, THDPNGroup2
 import torchvision
 import torchvision.transforms as transforms
 from utils import progress_bar
@@ -291,8 +293,8 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
 
 
 def run(start_epoch, layer, args, grad_queue, grad_queue2, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, start_event, start_event2):
-    logger = logging.getLogger(args.model + '-ours3-rank-' + str(dist.get_rank()))
-    file_handler = logging.FileHandler(args.model +'-ours3-rank-' + str(dist.get_rank()) + '.log')
+    logger = logging.getLogger(args.model + '-ours3press-rank-' + str(dist.get_rank()))
+    file_handler = logging.FileHandler(args.model +'-ours3press-rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
@@ -316,7 +318,7 @@ def run(start_epoch, layer, args, grad_queue, grad_queue2, targets_queue, global
                 'acc': best_acc,
                 'epoch': epoch,
             }
-            torch.save(state, './checkpoint/'+ args.model + '-ours3-rank-' + str(r) + '_ckpt.t7')
+            torch.save(state, './checkpoint/' + args.model + '-ours3press-rank-' + str(r) + '_ckpt.t7')
         time.sleep(1)
     if r == 0 or r == 1:
         global_event.wait()
@@ -374,15 +376,27 @@ if __name__ == "__main__":
     """
         difference model
         """
+    node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M']
+    node_cfg_1 = [512, 512, 512, 512, 'M']
+    node_cfg_2 = [512, 512, 512, 512, 'M']
+
     if args.rank == 0:
-        layer = THResNet101Group0()
+        # layer = THResNet101Group0()
+        # layer = GoogleNetGroup0()
+        layer = VggLayer(node_cfg_0)
+        #layer = THDPNGroup0()
         layer.cuda()
     elif args.rank == 1:
-        layer = THResNet101Group1()
+        # layer = THResNet101Group1()
+        # layer = GoogleNetGroup1()
+        layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
+        #layer = THDPNGroup1()
         layer.cuda()
     elif args.rank == 2:
-        layer = THResNet101Group2()
-        layer.cuda()
+        # layer = THResNet101Group2()
+        # layer = GoogleNetGroup2()
+        layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2], last_flag=True)
+        #layer = THDPNGroup2()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     #layer.share_memory()
     cudnn.benchmark = True
@@ -392,7 +406,7 @@ if __name__ == "__main__":
     if args.resume:
         print('==> Resuming from checkpoint..')
         assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-        checkpoint = torch.load('./checkpoint/' + args.model + '-ours3-rank-' + str(args.rank) + '_ckpt.t7')
+        checkpoint = torch.load('./checkpoint/' + args.model + '-ours3press-rank-' + str(args.rank) + '_ckpt.t7')
         layer.load_state_dict(checkpoint['net'])
         best_acc = checkpoint['acc']
         start_epoch = checkpoint['epoch']

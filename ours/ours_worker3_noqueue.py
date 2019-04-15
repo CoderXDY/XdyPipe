@@ -7,6 +7,7 @@ from torch.multiprocessing import Queue, Event
 from multiprocessing.managers import BaseManager as bm
 from multiprocessing.dummy import Process
 from multiprocessing.dummy import Queue as ThreadQueue
+from multiprocessing.dummy import Semaphore
 import torch.nn.functional as F
 import torch.optim as optim
 import logging
@@ -29,39 +30,6 @@ import numpy as np
  pipeline ResNet script for Tianhe-2  with gpu cluster
 
 """
-
-
-
-
-
-
-
-def sparse2(tensor, k, half=True, residual=None):
-
-    array_tensor = tensor.view(-1)
-    if residual is None:
-        residual = torch.zeros(array_tensor.size(), device=torch.device('cuda:1'))
-    array_tensor.add_(residual)
-    threshold = array_tensor.topk(int(array_tensor.nelement()*k) if int(array_tensor.nelement()*k) != 0 else 1)[0][-1]
-    residual = torch.where(abs(array_tensor) < threshold, array_tensor, torch.zeros(array_tensor.size(), device=torch.device('cuda:1')))
-    array_tensor[abs(array_tensor) < threshold] = 0.
-    indexs = array_tensor.nonzero().t()
-    values = array_tensor[indexs[0]]
-    sparse_tensor = torch.cat([indexs[0].float(), values])
-    if half:
-        sparse_tensor = sparse_tensor.half()
-
-    return sparse_tensor, residual
-
-
-
-
-
-
-
-
-
-
 def dense(tensor, shape):
     if tensor.type() != 'torch.FloatTensor':
         tensor = tensor.float()
@@ -74,6 +42,46 @@ def dense(tensor, shape):
     sparse_tensor = torch.sparse.FloatTensor(indexs, values, torch.Size([length]))
     return sparse_tensor.to_dense().view(shape)
 
+################################################
+##quantize
+#################################################
+
+def quantize(input, num_bits=8, char=False, prop=1000):
+    qmin = 0.
+    qmax = 2. ** (num_bits - 1) - 1.
+    scale = qmax - qmin
+    input = torch.round(input.mul(scale).mul(prop))
+    if char:
+        input = input.char()
+    return input
+
+    #b = torch.abs(a)
+    #c = torch.max(b)
+    #torch.round(torch.abs(a).mul(255).div(c))
+
+def dequantize(input, num_bits=8, prop=1000):
+    if input.type() != 'torch.FloatTensor':
+        input = input.float()
+    qmin = 0.
+    qmax = 2. ** (num_bits - 1) - 1.
+    scale = qmax - qmin
+    input.div_(prop * scale)
+    return input
+
+
+
+def q_act(input, num_bits=8, char=False):
+    qmax = 2. ** num_bits - 1.
+    input = torch.round(input.mul(qmax)).div(qmax)
+    if char:
+        input = input.char()
+    return input
+
+def dq_act(input, min=-0.0020, max=0.0020):
+    input = input.float()
+    noise = input.new(input.size()).uniform_(min, max)
+    input.add_(noise)
+    return input
 
 
 
@@ -86,63 +94,67 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
     optimizer.zero_grad()
     layer.train()
 
-    def backward_rank0():
-        start_event.wait()
+    def backward_rank0(semaphore):
+        semaphore.release()
         batch_idx = 0
         while True:
             try:
-                grad = grad_queue.get(block=True, timeout=1)
-                #grad = torch.from_numpy(grad)
-                #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
-                grad = torch.from_numpy(grad).cuda(0).float()
-            except Empty as empty:
-                print("backward empty.....")
+                print("before grad recv")
+                grad_recv = torch.zeros([args.batch_size, 256, 4, 4], dtype=torch.int8)
+                dist.recv(tensor=grad_recv, src=1)
+                print("after grad recv...")
+            except RuntimeError as error:
+                e.wait()
                 break
+            grad_recv = dequantize(grad_recv.cuda(0).float())
             loss = outputs_queue.get(block=False)
-            loss.backward(grad)
+            loss.backward(grad_recv)
             if batch_idx % args.buffer_size == 0:
                 optimizer.step()
                 optimizer.zero_grad()
             batch_idx += 1
 
 
-    def backward_rank1():
-        start_event2.wait()
+    def backward_rank1(semaphore):
+        #semaphore.release()
         batch_idx = 0
         while True:
             try:
-                grad = grad_queue2.get(block=True, timeout=1)
-                #grad = torch.from_numpy(grad)
-                #grad = dense(grad, [args.batch_size, 256, 4, 4]).cuda(0)
-                grad = torch.from_numpy(grad).cuda(0).float().requires_grad_()
-            except Empty as empty:
-                print("backward empty.....")
+                print("before grad recv...")
+                grad_recv = torch.zeros([args.batch_size, 512, 2, 2], dtype=torch.int8)
+                dist.recv(tensor=grad_recv, src=2)
+                print("after grad recv.....")
+            except RuntimeError as error:
+                send_opt = dist.isend(tensor=torch.zeros(0), dst=0)
+                send_opt.wait()
                 break
+            grad_recv = dequantize(grad_recv.cuda(0).float())
+            grad_recv.requires_grad_()
             outputs = outputs_queue.get(block=False)
-            outputs.backward(grad)
-            grad_queue.put(rec_val.grad.cpu().half().numpy())
+            outputs.backward(grad_recv)
             if batch_idx % args.buffer_size == 0:
                 optimizer.step()
                 optimizer.zero_grad()
-            if batch_idx == 0:
-                start_event.set()
             batch_idx += 1
+            send_opt = dist.isend(tensor=quantize(grad_recv.grad).cpu(), dst=1)
+            send_opt.wait()
 
 
     if dist.get_rank() == 0:
         criterion.cuda(0)
         outputs_queue = ThreadQueue(args.buffer_size)
-        back_process = Process(target=backward_rank0)
+        #semaphore = Semaphore(args.buffer_size)
+        back_process = Process(target=backward_rank0, args=(semaphore, ))
         back_process.start()
         for batch_idx, (inputs, targets) in enumerate(trainloader):
+            semaphore.acquire()
             print("batch: " + str(batch_idx))
             inputs, targets = inputs.cuda(0), targets
             outputs = layer(inputs)
-            send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
-            # if batch_idx < 30:
-            send_opt.wait()
             targets_queue.put(targets.numpy())
             outputs_queue.put(outputs)
+            send_opt = dist.isend(tensor=q_act(outputs, char=True).cpu(), dst=1)
+            send_opt.wait()
             print("send....")
         send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
         send_opt.wait()
@@ -151,28 +163,32 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
     elif dist.get_rank() == 1:
         batch_idx = 0
         criterion.cuda(0)
-        outputs_queue = ThreadQueue(args.buffer_size)
-        back_process = Process(target=backward_rank1)
+        outputs_queue = ThreadQueue(args.buffer_size - 1)
+        semaphore = Semaphore(args.buffer_size - 1)
+        back_process = Process(target=backward_rank1, args=(semaphore, ))
         back_process.start()
         while True:
             try:
-                rec_val = torch.zeros([args.batch_size, 512, 16, 16])
+                print("before semaphore......")
+                semaphore.acquire()
+                rec_val = torch.zeros([args.batch_size, 256, 4, 4], dtype=torch.int8)
                 dist.recv(tensor=rec_val, src=0)
+                print("after recv.....")
             except RuntimeError as error:
                 send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
                 send_opt.wait()
                 back_process.join()
                 e.wait()
                 break
+            rec_val = dq_act(rec_val)
             rec_val = rec_val.cuda(0)
             rec_val.requires_grad_()
             outputs = layer(rec_val)
             if batch_idx % args.buffer_size == 0:
                 optimizer.step()
                 optimizer.zero_grad()
-            send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
             outputs_queue.put(outputs)
-            # if batch_idx < 30:
+            send_opt = dist.isend(tensor=q_act(outputs, char=True).cpu(), dst=2)
             send_opt.wait()
             batch_idx += 1
 
@@ -182,14 +198,19 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
         correct = 0
         total = 0
         criterion.cuda(0)
-        residual = None
+
         while True:
             try:
-                rec_val = torch.zeros([args.batch_size, 1024, 8, 8])
+                print("before recv....")
+                rec_val = torch.zeros([args.batch_size, 512, 2, 2], dtype=torch.int8)
                 dist.recv(tensor=rec_val, src=1)
+                print("after recv.....")
             except RuntimeError as error:
+                send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
+                send_opt.wait()
                 e.wait()
                 break
+            rec_val = dq_act(rec_val)
             rec_val = rec_val.cuda(0)
             rec_val.requires_grad_()
             outputs = layer(rec_val)
@@ -197,13 +218,7 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
             targets = torch.from_numpy(targets).cuda(0)
             loss = criterion(outputs, targets)
             loss.backward()
-            #spare_grad, residual = sparse2(rec_val.grad, 0.01, True, residual)
-            #grad_queue.put(spare_grad.cpu().numpy())
-            #print('before grad put')
-            grad_queue2.put(rec_val.grad.cpu().half().numpy())
-            #print('after grad put')
-            if batch_idx == 0:
-                start_event2.set()
+
             if batch_idx % args.buffer_size == 0:
                 optimizer.step()
                 train_loss += loss.item()
@@ -221,6 +236,9 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
             acc_str = "tacc: %.3f" % (100. * correct / total,)
             logger.error(acc_str)
             batch_idx += 1
+            quantize_grad = quantize(rec_val.grad)
+            send_opt = dist.isend(tensor=quantize_grad.cpu(), dst=1)
+            send_opt.wait()
 
 def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
     criterion = nn.CrossEntropyLoss()
@@ -243,7 +261,7 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
             batch_idx = 0
             while True:
                 try:
-                    rec_val = torch.zeros([100, 512, 16, 16])  # difference model has difference shape
+                    rec_val = torch.zeros([100, 256, 4, 4])  # difference model has difference shape
                     dist.recv(tensor=rec_val, src=0)
                 except RuntimeError as error:
                     send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
@@ -263,7 +281,7 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
             global best_acc
             while True:
                 try:
-                    rec_val = torch.zeros([100, 1024, 8, 8])
+                    rec_val = torch.zeros([100, 512, 2, 2])
                     dist.recv(tensor=rec_val, src=1)
                 except RuntimeError as error:
                     print("done....")
@@ -340,7 +358,7 @@ if __name__ == "__main__":
     parser.add_argument('-epoch', type=int, default=0)
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
     parser.add_argument('-model', help='the path fo share file system')
-    parser.add_argument('-buffer_size', type=int, help='size of batch', default=4)
+    parser.add_argument('-buffer_size', type=int, help='size of batch', default=6)
     parser.add_argument('-port', type=int, default=5000)
     args = parser.parse_args()
     print("ip: " + args.ip)
@@ -371,7 +389,7 @@ if __name__ == "__main__":
     save_event = m.get_save_event()
     start_event = m.get_start_thread_event()
     grad_queue2 = m.get_grad_queue2()
-    start_event2 = m.get_start_thread_event2()
+    #start_event2 = m.get_start_thread_event2()
 
     """
         difference model
@@ -383,20 +401,21 @@ if __name__ == "__main__":
     if args.rank == 0:
         # layer = THResNet101Group0()
         # layer = GoogleNetGroup0()
-        # layer = VggLayer(node_cfg_0)
-        layer = THDPNGroup0()
+        layer = VggLayer(node_cfg_0)
+        #layer = THDPNGroup0()
         layer.cuda()
     elif args.rank == 1:
         # layer = THResNet101Group1()
         # layer = GoogleNetGroup1()
-        # layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
-        layer = THDPNGroup1()
+        layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
+        #layer = THDPNGroup1()
         layer.cuda()
     elif args.rank == 2:
         # layer = THResNet101Group2()
         # layer = GoogleNetGroup2()
-        # layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2], last_flag=True)
-        layer = THDPNGroup2()
+        layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2], last_flag=True)
+        #layer = THDPNGroup2()
+        layer.cuda()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     #layer.share_memory()
     cudnn.benchmark = True
@@ -446,5 +465,5 @@ if __name__ == "__main__":
 
     if args.epoch != 0:
         start_epoch = args.epoch
-    run(start_epoch, layer, args, grad_queue, grad_queue2, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, start_event, start_event2)
+    run(start_epoch, layer, args, grad_queue, grad_queue2, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, start_event, None)
 
