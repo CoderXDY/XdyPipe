@@ -143,7 +143,7 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
     if dist.get_rank() == 0:
         criterion.cuda(0)
         outputs_queue = ThreadQueue(args.buffer_size)
-        #semaphore = Semaphore(args.buffer_size)
+        semaphore = Semaphore(args.buffer_size)
         back_process = Process(target=backward_rank0, args=(semaphore, ))
         back_process.start()
         for batch_idx, (inputs, targets) in enumerate(trainloader):
@@ -164,7 +164,7 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
         batch_idx = 0
         criterion.cuda(0)
         outputs_queue = ThreadQueue(args.buffer_size - 1)
-        semaphore = Semaphore(args.buffer_size - 1)
+        #semaphore = Semaphore(args.buffer_size - 1)
         back_process = Process(target=backward_rank1, args=(semaphore, ))
         back_process.start()
         while True:
