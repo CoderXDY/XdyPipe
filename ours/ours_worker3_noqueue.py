@@ -115,7 +115,7 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
             batch_idx += 1
 
 
-    def backward_rank1(semaphore):
+    def backward_rank1():
         #semaphore.release()
         batch_idx = 0
         while True:
@@ -165,7 +165,7 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
         criterion.cuda(0)
         outputs_queue = ThreadQueue(args.buffer_size - 1)
         #semaphore = Semaphore(args.buffer_size - 1)
-        back_process = Process(target=backward_rank1, args=(semaphore, ))
+        back_process = Process(target=backward_rank1)
         back_process.start()
         while True:
             try:
