@@ -170,7 +170,7 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
         while True:
             try:
                 print("before semaphore......")
-                semaphore.acquire()
+                #semaphore.acquire()
                 rec_val = torch.zeros([args.batch_size, 256, 4, 4], dtype=torch.int8)
                 dist.recv(tensor=rec_val, src=0)
                 print("after recv.....")
