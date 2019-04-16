@@ -22,7 +22,7 @@ global_event = Event()
 save_event = Event()
 backward_event = Event()
 start_event = Event()
-start_event = Event()
+start_event2 = Event()
 
 def get_epoch_event():
     return epoch_event
