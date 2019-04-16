@@ -104,6 +104,7 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
                 dist.recv(tensor=grad_recv, src=1)
                 print("after grad recv...")
             except RuntimeError as error:
+                traceback.format_exc(error)
                 e.wait()
                 break
             grad_recv = dequantize(grad_recv.cuda(0).float())
@@ -115,28 +116,31 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
             batch_idx += 1
 
 
-    def backward_rank1():
-        #semaphore.release()
+    def backward_rank1(semaphore):
+        semaphore.release()
         batch_idx = 0
         while True:
             try:
                 print("before grad recv...")
-                grad_recv = torch.zeros([args.batch_size, 512, 2, 2], dtype=torch.int8)
-                dist.recv(tensor=grad_recv, src=2)
+                grad_recv1 = torch.zeros([args.batch_size, 512, 2, 2], dtype=torch.int8)
+                dist.recv(tensor=grad_recv1, src=2)
                 print("after grad recv.....")
             except RuntimeError as error:
+                traceback.format_exc(error)
                 send_opt = dist.isend(tensor=torch.zeros(0), dst=0)
                 send_opt.wait()
                 break
-            grad_recv = dequantize(grad_recv.cuda(0).float())
-            grad_recv.requires_grad_()
+            grad_recv1 = dequantize(grad_recv1.cuda(0).float())
+            grad_recv1.requires_grad_()
             outputs = outputs_queue.get(block=False)
-            outputs.backward(grad_recv)
+            outputs.backward(grad_recv1)
             if batch_idx % args.buffer_size == 0:
                 optimizer.step()
                 optimizer.zero_grad()
             batch_idx += 1
-            send_opt = dist.isend(tensor=quantize(grad_recv.grad).cpu(), dst=1)
+            grad_recv1 = quantize(grad_recv1.grad).cpu()
+            print(grad_recv1.size())
+            send_opt = dist.isend(tensor=grad_recv1, dst=1)
             send_opt.wait()
 
 
@@ -156,6 +160,7 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
             send_opt = dist.isend(tensor=q_act(outputs, char=True).cpu(), dst=1)
             send_opt.wait()
             print("send....")
+        print("start to end..")
         send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
         send_opt.wait()
         back_process.join()
@@ -163,34 +168,40 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
     elif dist.get_rank() == 1:
         batch_idx = 0
         criterion.cuda(0)
-        outputs_queue = ThreadQueue(args.buffer_size - 1)
-        #semaphore = Semaphore(args.buffer_size - 1)
-        back_process = Process(target=backward_rank1)
+        outputs_queue = ThreadQueue(10)
+        semaphore = Semaphore(args.buffer_size - 1)
+        back_process = Process(target=backward_rank1, args=(semaphore,))
         back_process.start()
         while True:
             try:
                 print("before semaphore......")
-                #semaphore.acquire()
+                semaphore.acquire()
                 rec_val = torch.zeros([args.batch_size, 256, 4, 4], dtype=torch.int8)
                 dist.recv(tensor=rec_val, src=0)
                 print("after recv.....")
             except RuntimeError as error:
+                print("runtime errror")
                 send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
                 send_opt.wait()
                 back_process.join()
                 e.wait()
                 break
+            print("before dq...")
             rec_val = dq_act(rec_val)
             rec_val = rec_val.cuda(0)
             rec_val.requires_grad_()
+            print("before output......")
             outputs = layer(rec_val)
             if batch_idx % args.buffer_size == 0:
                 optimizer.step()
                 optimizer.zero_grad()
+            print("before queue")
             outputs_queue.put(outputs)
+            print("after queue")
             send_opt = dist.isend(tensor=q_act(outputs, char=True).cpu(), dst=2)
             send_opt.wait()
             batch_idx += 1
+            print("send end...")
 
     elif dist.get_rank() == 2:
         batch_idx = 0
@@ -206,6 +217,7 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
                 dist.recv(tensor=rec_val, src=1)
                 print("after recv.....")
             except RuntimeError as error:
+                print("runtime error")
                 send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
                 send_opt.wait()
                 e.wait()
@@ -237,6 +249,7 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
             logger.error(acc_str)
             batch_idx += 1
             quantize_grad = quantize(rec_val.grad)
+            print(quantize_grad.size())
             send_opt = dist.isend(tensor=quantize_grad.cpu(), dst=1)
             send_opt.wait()
 
