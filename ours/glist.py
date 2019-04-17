@@ -345,3 +345,16 @@ q = torch.round(a.mul(255).mul(1000))
 print("-----------")
 dq = q.div(1000 * 255)
 print(dq)
+
+if batch_idx % args.buffer_size == 0:
+    optimizer.step()
+    train_loss += loss.item()
+    _, predicted = outputs.max(1)
+    total += targets.size(0)
+    correct += predicted.eq(targets).sum().item()
+    progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                 % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+    optimizer.zero_grad()
+else:
+    progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                 % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))

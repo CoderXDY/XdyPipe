@@ -341,7 +341,7 @@ def run(start_epoch, layer, args, grad_queue, grad_queue2, targets_queue, global
     formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
-    epoch_num = 200
+    epoch_num = 200 -start_epoch
     global best_acc
     r = dist.get_rank()
     for epoch in range(start_epoch, start_epoch + epoch_num):

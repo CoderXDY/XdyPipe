@@ -167,9 +167,9 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
             rec_val = rec_val.cuda(0)
             rec_val.requires_grad_()
             outputs = layer(rec_val)
-            if batch_idx % args.buffer_size == 0:
-                optimizer.step()
-                optimizer.zero_grad()
+            # if batch_idx % args.buffer_size == 0:
+            #     optimizer.step()
+            #     optimizer.zero_grad()
             send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
             outputs_queue.put(outputs)
             # if batch_idx < 30:
