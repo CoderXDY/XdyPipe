@@ -200,9 +200,9 @@ def train(layer, logger, args, grad_queue, grad_queue2, targets_queue, e, data_s
             rec_val.requires_grad_()
             print("before output......")
             outputs = layer(rec_val)
-            if batch_idx % args.buffer_size == 0:
-                optimizer.step()
-                optimizer.zero_grad()
+            # if batch_idx % args.buffer_size == 0:
+            #     optimizer.step()
+            #     optimizer.zero_grad()
             print("before queue")
             outputs_queue.put([rec_val, outputs])
             print("after queue")
