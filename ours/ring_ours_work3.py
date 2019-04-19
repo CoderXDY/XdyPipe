@@ -109,6 +109,10 @@ def transfer(tag, send_buf, shape):
         send_opt.wait()
         return recv_buf
 
+
+
+
+
 """
 1) add quan
 2) whether to save quan value or not in local
@@ -134,6 +138,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         grad_recv1 = torch.zeros(shapes[1])
         dist.recv(tensor=grad_recv1, src=2)
         while True:
+            print(" backward batch_idx:" + str(batch_idx))
             #grad_recv1 = dequantize(grad_recv1.cuda().float())
             grad_recv1 = grad_recv1.cuda()
             try:
@@ -152,9 +157,11 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             batch_idx += 1
             if data_size == batch_idx:
                 transfer(3, inputs_grad, None)
-                print("backend end..")
+                print("backend In send..")
                 break
             grad_recv1 = transfer(3, inputs_grad, shapes[1])
+            print("backward send.......")
+        print("backard end....")
 
     def backward_rank0(semaphore):
         batch_idx = 0
@@ -164,6 +171,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             #semaphore.release()
 
             #grad_recv = dequantize(grad_recv.cuda().float())
+            print(" backwardbatch_idx:" + str(batch_idx))
             grad_recv = grad_recv.cuda()
             try:
                 loss = outputs_queue.get(block=True, timeout=4)
@@ -173,14 +181,16 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
 
             loss.backward(grad_recv)
             if batch_idx % 2 == 0:
-                print("step: " + str(batch_idx))
+               # print("step: " + str(batch_idx))
                 optimizer.step()
                 optimizer.zero_grad()
             batch_idx += 1
             if data_size == batch_idx:
-                print("backend end...")
+                print("eq...")
                 break
             grad_recv = transfer(4, None, shapes[0])
+            print("backward send.....")
+        print("backward end..")
 
     if dist.get_rank() == 0:
         outputs_queue = ThreadQueue(args.buffer_size)
@@ -197,6 +207,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             transfer(dist.get_rank(), outputs.cpu(), None)
             print("send........")
         print("start to end....")
+
         back_process.join()
         e.set()
         print("end....")
@@ -209,16 +220,22 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         rec_val = torch.zeros(shapes[0])
         dist.recv(tensor=rec_val, src=0)
         for index, (_, targets) in enumerate(trainloader):
+            print("batch_idx:" + str(index))
             #rec_val = dq_act(rec_val)
             rec_val = rec_val.cuda()
             rec_val.requires_grad_()
             outputs = layer(rec_val)
             outputs_queue.put([rec_val, outputs])
             #outputs = q_act(outputs, char=True)
+            if index == data_size - 1:
+                transfer(dist.get_rank(), outputs.cpu(), None)
+                print("the last send........")
+                continue
             rec_val = transfer(dist.get_rank(), outputs.cpu(), shapes[0])
             print("send.................")
         print("start to end....")
         back_process.join()
+
         e.wait()
         print("end......")
 
@@ -258,6 +275,9 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             logger.error("train:" + str(train_loss / (batch_idx + 1)))
             acc_str = "tacc: %.3f" % (100. * correct / total,)
             logger.error(acc_str)
+            if batch_idx == data_size -1:
+                transfer(dist.get_rank(), quantize_grad, None)
+                continue
             rec_val = transfer(dist.get_rank(), quantize_grad, shapes[1])
         print("\n start to end....")
         e.wait()
@@ -351,7 +371,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
                 outputs = layer(inputs)
                 dist.send(tensor=outputs.cpu(), dst=1)
                 print("send.....")
-                time.sleep(1)
+
             e.wait()
         elif dist.get_rank() == 1:
             batch_idx = 0
@@ -364,7 +384,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
                 dist.send(tensor=outputs.cpu(), dst=2)
                 batch_idx += 1
                 print("send...")
-                time.sleep(1)
+
             e.wait()
         elif dist.get_rank() == 2:
             test_loss = 0
@@ -389,6 +409,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
                 logger.error("eval:" + str(test_loss / (batch_idx + 1)))
                 acc_str = "eacc: %.3f" % (100. * correct / total,)
                 logger.error(acc_str)
+            time.sleep(1)
             acc = 100. * correct / total
             if acc > best_acc:
                 best_acc = acc
