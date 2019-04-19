@@ -139,6 +139,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             try:
                 inputs, outputs = outputs_queue.get(block=True, timeout=4)
             except Empty:
+                print("empty........")
                 break
             inputs.requires_grad_()
             outputs.backward(grad_recv1)
@@ -151,9 +152,9 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             batch_idx += 1
             if data_size == batch_idx:
                 transfer(3, inputs_grad, None)
+                print("backend end..")
                 break
             grad_recv1 = transfer(3, inputs_grad, shapes[1])
-        e.wait()
 
     def backward_rank0(semaphore):
         batch_idx = 0
@@ -177,9 +178,9 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 optimizer.zero_grad()
             batch_idx += 1
             if data_size == batch_idx:
+                print("backend end...")
                 break
             grad_recv = transfer(4, None, shapes[0])
-        e.set()
 
     if dist.get_rank() == 0:
         outputs_queue = ThreadQueue(args.buffer_size)
@@ -195,17 +196,18 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             #outputs = q_act(outputs, char=True)
             transfer(dist.get_rank(), outputs.cpu(), None)
             print("send........")
-        #back_process.join()
-        e.wait()
+        print("start to end....")
+        back_process.join()
+        e.set()
+        print("end....")
 
     elif dist.get_rank() == 1:
-        rec_val = None
+
         outputs_queue = ThreadQueue(args.buffer_size)
         back_process = Process(target=backward_rank1, args=())
         back_process.start()
-        if not torch.is_tensor(rec_val):
-            rec_val = torch.zeros(shapes[0])
-            dist.recv(tensor=rec_val, src=0)
+        rec_val = torch.zeros(shapes[0])
+        dist.recv(tensor=rec_val, src=0)
         for index, (_, targets) in enumerate(trainloader):
             #rec_val = dq_act(rec_val)
             rec_val = rec_val.cuda()
@@ -215,8 +217,10 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             #outputs = q_act(outputs, char=True)
             rec_val = transfer(dist.get_rank(), outputs.cpu(), shapes[0])
             print("send.................")
-        #back_process.join()
+        print("start to end....")
+        back_process.join()
         e.wait()
+        print("end......")
 
     elif dist.get_rank() == 2:
         rec_val = None
@@ -255,124 +259,68 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             acc_str = "tacc: %.3f" % (100. * correct / total,)
             logger.error(acc_str)
             rec_val = transfer(dist.get_rank(), quantize_grad, shapes[1])
+        print("\n start to end....")
         e.wait()
+        print("end....")
 
 
 
 
-def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
-    criterion = nn.CrossEntropyLoss()
-    criterion.cuda()
-    layer.eval()
-
-    with torch.no_grad():
-        if dist.get_rank() == 0:
-            for batch_idx, (inputs, targets) in enumerate(testloader):
-                print('batch_idx: ' + str(batch_idx))
-                inputs, targets = inputs.cuda(0), targets
-                outputs = layer(inputs)
-                targets_queue.put(targets.numpy())
-                send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
-                send_opt.wait()
-            send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
-            send_opt.wait()
-            e.wait()
-        elif dist.get_rank() == 1:
-            batch_idx = 0
-            while True:
-                try:
-                    print("batch_idx:" + str(batch_idx))
-                    rec_val = torch.zeros([100, 256, 4, 4])  # difference model has difference shape
-                    dist.recv(tensor=rec_val, src=0)
-                except RuntimeError as error:
-                    send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
-                    send_opt.wait()
-                    e.wait()
-                    break
-                outputs = layer(rec_val.cuda())
-                send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
-                send_opt.wait()
-                batch_idx += 1
-        elif dist.get_rank() == 2:
-            batch_idx = 0
-            test_loss = 0
-            correct = 0
-            total = 0
-            save_event.clear()
-            global best_acc
-            while True:
-                try:
-                    rec_val = torch.zeros([100, 512, 2, 2])
-                    dist.recv(tensor=rec_val, src=1)
-                except RuntimeError as error:
-                    print("done....")
-                    acc = 100. * correct / total
-                    if acc > best_acc:
-                        best_acc = acc
-                        save_event.set()
-                    e.set()
-                    break
-                outputs = layer(rec_val.cuda(0))
-                targets = targets_queue.get(block=True, timeout=2)
-                targets = torch.from_numpy(targets).cuda(0)
-                loss = criterion(outputs, targets)
-                test_loss += loss.item()
-                _, predicted = outputs.max(1)
-                total += targets.size(0)
-                correct += predicted.eq(targets).sum().item()
-
-                progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                             % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-                #if batch_idx % 10 == 0:
-                logger.error("eval:" + str(test_loss / (batch_idx + 1)))
-                acc_str = "eacc: %.3f" % (100. * correct / total,)
-                logger.error(acc_str)
-                batch_idx += 1
-
-
-
-
-
-# def eval(layer, logger, shapes, e, save_event, data_size, testloader):
+# def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
 #     criterion = nn.CrossEntropyLoss()
 #     criterion.cuda()
 #     layer.eval()
+#
 #     with torch.no_grad():
 #         if dist.get_rank() == 0:
 #             for batch_idx, (inputs, targets) in enumerate(testloader):
 #                 print('batch_idx: ' + str(batch_idx))
-#                 inputs = inputs.cuda(0)
+#                 inputs, targets = inputs.cuda(0), targets
 #                 outputs = layer(inputs)
-#                 dist.send(tensor=outputs.cpu(), dst=1)
-#                 print("send.....")
-#                 if batch_idx == 99:
-#                     time.sleep(1)
+#                 targets_queue.put(targets.numpy())
+#                 send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
+#                 send_opt.wait()
+#             send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
+#             send_opt.wait()
 #             e.wait()
 #         elif dist.get_rank() == 1:
 #             batch_idx = 0
-#             while data_size > batch_idx:
-#                 print("batch_idx:" + str(batch_idx))
-#                 rec_val = torch.zeros([100, 256, 4, 4])  # difference model has difference shape
-#                 dist.recv(tensor=rec_val, src=0)
-#                 print("after recv....")
+#             while True:
+#                 try:
+#                     print("batch_idx:" + str(batch_idx))
+#                     rec_val = torch.zeros([100, 256, 4, 4])  # difference model has difference shape
+#                     dist.recv(tensor=rec_val, src=0)
+#                 except RuntimeError as error:
+#                     send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
+#                     send_opt.wait()
+#                     e.wait()
+#                     break
 #                 outputs = layer(rec_val.cuda())
-#                 dist.send(tensor=outputs.cpu(), dst=2)
+#                 send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
+#                 send_opt.wait()
 #                 batch_idx += 1
-#                 print("send...")
-#             e.wait()
 #         elif dist.get_rank() == 2:
+#             batch_idx = 0
 #             test_loss = 0
 #             correct = 0
 #             total = 0
 #             save_event.clear()
 #             global best_acc
-#
-#             for batch_idx, (inputs, targets) in enumerate(testloader):
-#                 rec_val = torch.zeros([100, 512, 2, 2])
-#                 dist.recv(tensor=rec_val, src=1)
-#                 print("after recv....")
+#             while True:
+#                 try:
+#                     rec_val = torch.zeros([100, 512, 2, 2])
+#                     dist.recv(tensor=rec_val, src=1)
+#                 except RuntimeError as error:
+#                     print("done....")
+#                     acc = 100. * correct / total
+#                     if acc > best_acc:
+#                         best_acc = acc
+#                         save_event.set()
+#                     e.set()
+#                     break
 #                 outputs = layer(rec_val.cuda(0))
-#                 targets = targets.cuda()
+#                 targets = targets_queue.get(block=True, timeout=2)
+#                 targets = torch.from_numpy(targets).cuda(0)
 #                 loss = criterion(outputs, targets)
 #                 test_loss += loss.item()
 #                 _, predicted = outputs.max(1)
@@ -381,15 +329,72 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
 #
 #                 progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
 #                              % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+#                 #if batch_idx % 10 == 0:
 #                 logger.error("eval:" + str(test_loss / (batch_idx + 1)))
 #                 acc_str = "eacc: %.3f" % (100. * correct / total,)
 #                 logger.error(acc_str)
-#             acc = 100. * correct / total
-#             if acc > best_acc:
-#                 best_acc = acc
-#                 save_event.set()
-#             time.sleep(1)
-#             e.set()
+#                 batch_idx += 1
+
+
+
+
+
+def eval(layer, logger, e, save_event, data_size, testloader):
+    criterion = nn.CrossEntropyLoss()
+    criterion.cuda()
+    layer.eval()
+    with torch.no_grad():
+        if dist.get_rank() == 0:
+            for batch_idx, (inputs, targets) in enumerate(testloader):
+                print('batch_idx: ' + str(batch_idx))
+                inputs = inputs.cuda(0)
+                outputs = layer(inputs)
+                dist.send(tensor=outputs.cpu(), dst=1)
+                print("send.....")
+                time.sleep(1)
+            e.wait()
+        elif dist.get_rank() == 1:
+            batch_idx = 0
+            while data_size > batch_idx:
+                print("batch_idx:" + str(batch_idx))
+                rec_val = torch.zeros([100, 256, 4, 4])  # difference model has difference shape
+                dist.recv(tensor=rec_val, src=0)
+                print("after recv....")
+                outputs = layer(rec_val.cuda())
+                dist.send(tensor=outputs.cpu(), dst=2)
+                batch_idx += 1
+                print("send...")
+                time.sleep(1)
+            e.wait()
+        elif dist.get_rank() == 2:
+            test_loss = 0
+            correct = 0
+            total = 0
+            save_event.clear()
+            global best_acc
+
+            for batch_idx, (inputs, targets) in enumerate(testloader):
+                rec_val = torch.zeros([100, 512, 2, 2])
+                dist.recv(tensor=rec_val, src=1)
+                outputs = layer(rec_val.cuda(0))
+                targets = targets.cuda()
+                loss = criterion(outputs, targets)
+                test_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total += targets.size(0)
+                correct += predicted.eq(targets).sum().item()
+
+                progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                             % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                logger.error("eval:" + str(test_loss / (batch_idx + 1)))
+                acc_str = "eacc: %.3f" % (100. * correct / total,)
+                logger.error(acc_str)
+            acc = 100. * correct / total
+            if acc > best_acc:
+                best_acc = acc
+                save_event.set()
+            time.sleep(1)
+            e.set()
 
 
 
@@ -471,7 +476,7 @@ def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_eve
         epoch_event.clear()
         time.sleep(1)
         print('Eval epoch: %d' % epoch)
-        eval(layer, logger, args, targets_queue, epoch_event, save_event, test_size, testloader)
+        eval(layer, logger, epoch_event, save_event, test_size, testloader)
         epoch_event.clear()
         if save_event.is_set():
             print('Saving..')
