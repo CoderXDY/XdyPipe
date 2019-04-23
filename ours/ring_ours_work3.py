@@ -28,14 +28,53 @@ import torch.backends.cudnn as cudnn
 import numpy as np
 import random
 
-def quantize(input, num_bits=8, char=False, prop=1000):
+
+
+
+
+def compress(input, num_bits=8, prop=1000, residual=None):
+    input = input.view(-1)
+    if residual is None:
+        residual = torch.zeros(input.size(), device=torch.device('cuda:0'))
+    input.add_(residual)
+    threshold = input.topk(int(input.nelement() * 0.01) if int(input.nelement() * 0.01) != 0 else 1)[0][-1]
+    residual = torch.where(abs(input) < threshold, input,
+                           torch.zeros(input.size(), device=torch.device('cuda:0')))
+    input[abs(input) < threshold] = 0.
+
     qmin = 0.
     qmax = 2. ** (num_bits - 1) - 1.
     scale = qmax - qmin
     input = torch.round(input.mul(scale).mul(prop))
-    if char:
-        input = input.char()
-    return input
+
+    #indexs = input.nonzero().t()
+    #values = input[indexs[0]]
+    #sparse_tensor = torch.cat([indexs[0].float(), values])
+    #return sparse_tensor.half()
+    return input.char()
+
+def unpack(input, shape):
+    input = input.float()
+    half_size = int(len(input) / 2)
+    indexs = input[: half_size].view(1, half_size).long()
+    values = input[half_size:]
+    for i in range(len(shape)):
+        length *= shape[i]
+    sparse_tensor = torch.sparse.FloatTensor(indexs, values, torch.Size([length]))
+    return sparse_tensor.to_dense().view(shape)
+
+
+
+
+
+# def quantize(input, num_bits=8, char=False, prop=1000):
+#     qmin = 0.
+#     qmax = 2. ** (num_bits - 1) - 1.
+#     scale = qmax - qmin
+#     input = torch.round(input.mul(scale).mul(prop))
+#     if char:
+#         input = input.char()
+#     return input
 
     #b = torch.abs(a)
     #c = torch.max(b)
@@ -81,7 +120,7 @@ def get_left_right(tag):
     return left, right
 
 
-def transfer(tag, send_buf, shape):
+def transfer(tag, send_buf, shape, half=False):
 
     if shape == None:
         left, right = get_left_right(tag)
@@ -91,7 +130,10 @@ def transfer(tag, send_buf, shape):
     elif not torch.is_tensor(send_buf):
         left, right = get_left_right(tag)
         try:
-            recv_buf = torch.zeros(shape, dtype=torch.int8)#, dtype=torch.int8
+            if half:
+                recv_buf = torch.HalfTensor(torch.Size(shape))
+            else:
+                recv_buf = torch.zeros(shape, dtype=torch.int8)#, dtype=torch.int8
             dist.recv(tensor=recv_buf, src=left)
         except RuntimeError as error:
             print("runtime error..")
@@ -103,7 +145,10 @@ def transfer(tag, send_buf, shape):
         send_opt = dist.isend(tensor=send_buf, dst=right)
 
         try:
-            recv_buf = torch.zeros(shape, dtype=torch.int8)#, dtype=torch.int8
+            if half:
+                recv_buf = torch.HalfTensor(torch.Size(shape))
+            else:
+                recv_buf = torch.zeros(shape, dtype=torch.int8)
             dist.recv(tensor=recv_buf, src=left)
         except RuntimeError as error:
             print("runtime error")
@@ -136,11 +181,14 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
     batch_idx = 0
 
     def backward_rank1():
+        residual = None
         batch_idx = 0
         grad_recv1 = torch.zeros(shapes[1], dtype=torch.int8)
+        #grad_recv1 = torch.HalfTensor(torch.Size(shapes[1]))
         dist.recv(tensor=grad_recv1, src=2)
         while True:
             print(" backward batch_idx:" + str(batch_idx))
+            #grad_recv1 = unpack(grad_recv1.cuda(), shapes[1])
             grad_recv1 = dequantize(grad_recv1.cuda().float())
             #grad_recv1 = grad_recv1.cuda()
             try:
@@ -151,7 +199,8 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             inputs.requires_grad_()
             outputs.backward(grad_recv1)
 
-            inputs_grad = quantize(inputs.grad, char=True).cpu()
+            #inputs_grad = quantize(inputs.grad, char=True).cpu()
+            inputs_grad = compress(inputs.grad, residual=residual).cpu()
             #inputs_grad = inputs.grad.cpu()
             if batch_idx % 2 == 0:
                  optimizer.step()
@@ -168,11 +217,13 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
     def backward_rank0(semaphore):
         batch_idx = 0
         grad_recv = torch.zeros(shapes[0], dtype=torch.int8)
+        #grad_recv = torch.HalfTensor(torch.Size(shapes[0]))
         dist.recv(tensor=grad_recv, src=1)
         while True:
             #semaphore.release()
 
             grad_recv = dequantize(grad_recv.cuda().float())
+            #grad_recv = unpack(grad_recv.cuda(), shapes[0])
             print(" backwardbatch_idx:" + str(batch_idx))
            # grad_recv = grad_recv.cuda()
             try:
@@ -218,9 +269,11 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
 
         outputs_queue = ThreadQueue(args.buffer_size)
         back_process = Process(target=backward_rank1, args=())
-        back_process.start()
+
         rec_val = torch.zeros(shapes[0], dtype=torch.int8)
         dist.recv(tensor=rec_val, src=0)
+        #fix bug..
+        back_process.start()
         for index, (_, targets) in enumerate(trainloader):
             print("batch_idx:" + str(index))
             rec_val = dq_act(rec_val)
@@ -242,8 +295,9 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         print("end......")
 
     elif dist.get_rank() == 2:
+
         rec_val = None
-        count = 0
+        residual = None
         train_loss = 0
         correct = 0
         total = 0
@@ -260,7 +314,8 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             targets = targets.cuda()
             loss = criterion(outputs, targets)
             loss.backward()
-            quantize_grad = quantize(rec_val.grad, char=True).cpu()
+            #quantize_grad = quantize(rec_val.grad, char=True).cpu()
+            quantize_grad = compress(rec_val.grad, residual=residual).cpu()
             #quantize_grad = rec_val.grad.cpu()
             if batch_idx % 2 == 0:
                 optimizer.step()
@@ -281,6 +336,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 transfer(dist.get_rank(), quantize_grad, None)
                 continue
             rec_val = transfer(dist.get_rank(), quantize_grad, shapes[1])
+
         #print("\n start to end....")
         e.wait()
         print("end....")
