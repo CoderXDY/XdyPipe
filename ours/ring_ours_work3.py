@@ -51,7 +51,7 @@ def compress(input, num_bits=8, prop=1000, residual=None):
     #values = input[indexs[0]]
     #sparse_tensor = torch.cat([indexs[0].float(), values])
     #return sparse_tensor.half()
-    return input.char()
+    return input.char(), residual
 
 def unpack(input, shape):
     input = input.float()
@@ -200,7 +200,8 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             outputs.backward(grad_recv1)
 
             #inputs_grad = quantize(inputs.grad, char=True).cpu()
-            inputs_grad = compress(inputs.grad, residual=residual).cpu()
+            inputs_grad, residual = compress(inputs.grad, residual=residual)
+            inputs_grad = inputs_grad.cpu()
             #inputs_grad = inputs.grad.cpu()
             if batch_idx % 2 == 0:
                  optimizer.step()
@@ -315,7 +316,8 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             loss = criterion(outputs, targets)
             loss.backward()
             #quantize_grad = quantize(rec_val.grad, char=True).cpu()
-            quantize_grad = compress(rec_val.grad, residual=residual).cpu()
+            quantize_grad, residual = compress(rec_val.grad, residual=residual)
+            quantize_grad = quantize_grad.cpu()
             #quantize_grad = rec_val.grad.cpu()
             if batch_idx % 2 == 0:
                 optimizer.step()

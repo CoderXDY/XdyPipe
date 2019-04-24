@@ -47,21 +47,28 @@ def compress(input, num_bits=8, prop=1000, residual=None):
     scale = qmax - qmin
     input = torch.round(input.mul(scale).mul(prop))
 
-    #indexs = input.nonzero().t()
-    #values = input[indexs[0]]
-    #sparse_tensor = torch.cat([indexs[0].float(), values])
-    #return sparse_tensor.half()
-    return input.char()
+    indexs = input.nonzero().t()
+    values = input[indexs[0]]
+    sparse_tensor = torch.cat([indexs[0].float(), values])
+    return sparse_tensor, residual
 
-def unpack(input, shape):
-    input = input.float()
+def unpack(input, shape, num_bits=8, prop=1000):
+    #input = input.float()
     half_size = int(len(input) / 2)
     indexs = input[: half_size].view(1, half_size).long()
     values = input[half_size:]
+    length = 1
     for i in range(len(shape)):
         length *= shape[i]
     sparse_tensor = torch.sparse.FloatTensor(indexs, values, torch.Size([length]))
-    return sparse_tensor.to_dense().view(shape)
+    dense_tensor = sparse_tensor.to_dense().view(shape)
+    qmin = 0.
+    qmax = 2. ** (num_bits - 1) - 1.
+    scale = qmax - qmin
+    dense_tensor.div_(prop * scale)
+    return dense_tensor
+
+
 
 
 
@@ -120,7 +127,7 @@ def get_left_right(tag):
     return left, right
 
 
-def transfer(tag, send_buf, shape, half=False):
+def transfer(tag, send_buf, shape):
 
     if shape == None:
         left, right = get_left_right(tag)
@@ -130,10 +137,7 @@ def transfer(tag, send_buf, shape, half=False):
     elif not torch.is_tensor(send_buf):
         left, right = get_left_right(tag)
         try:
-            if half:
-                recv_buf = torch.HalfTensor(torch.Size(shape))
-            else:
-                recv_buf = torch.zeros(shape, dtype=torch.int8)#, dtype=torch.int8
+            recv_buf = torch.zeros(shape, dtype=torch.int8)#, dtype=torch.int8
             dist.recv(tensor=recv_buf, src=left)
         except RuntimeError as error:
             print("runtime error..")
@@ -143,18 +147,77 @@ def transfer(tag, send_buf, shape, half=False):
     else:
         left, right = get_left_right(tag)
         send_opt = dist.isend(tensor=send_buf, dst=right)
-
         try:
-            if half:
-                recv_buf = torch.HalfTensor(torch.Size(shape))
-            else:
-                recv_buf = torch.zeros(shape, dtype=torch.int8)
+            recv_buf = torch.zeros(shape, dtype=torch.int8)
             dist.recv(tensor=recv_buf, src=left)
         except RuntimeError as error:
             print("runtime error")
             return None
         send_opt.wait()
         return recv_buf
+
+
+
+def transfer4rank2(tag, send_buf, shape):
+
+    if shape == None:
+        left, right = get_left_right(tag)
+        dist.send(tensor=torch.ShortTensor([send_buf.size()]).view(-1), dst=right)
+        send_opt = dist.isend(tensor=send_buf, dst=right)
+        send_opt.wait()
+        return None
+
+    else:
+        left, right = get_left_right(tag)
+        dist.send(tensor=torch.ShortTensor([send_buf.size()]).view(-1), dst=right)
+        send_opt = dist.isend(tensor=send_buf, dst=right)
+        try:
+            recv_buf = torch.zeros(shape, dtype=torch.int8)
+            dist.recv(tensor=recv_buf, src=left)
+        except RuntimeError as error:
+            print("runtime error")
+            return None
+        send_opt.wait()
+        return recv_buf
+
+def transfer4backend1(tag, send_buf, flag=False):
+
+    if not flag:
+        left, right = get_left_right(tag)
+        dist.send(tensor=torch.ShortTensor([send_buf.size()]).view(-1), dst=right)
+        send_opt = dist.isend(tensor=send_buf, dst=right)
+        send_opt.wait()
+        return None
+
+    else:
+        left, right = get_left_right(tag)
+        dist.send(tensor=torch.ShortTensor([send_buf.size()]).view(-1), dst=right)
+        send_opt = dist.isend(tensor=send_buf, dst=right)
+        try:
+            shape_buf = torch.zeros([1], dtype=torch.short)
+            dist.recv(tensor=shape_buf, src=left)
+            recv_buf = torch.zeros(torch.Size(shape_buf.tolist()))
+            dist.recv(tensor=recv_buf, src=left)
+        except RuntimeError as error:
+            print("runtime error")
+            return None
+        send_opt.wait()
+        return recv_buf
+
+
+
+def transfer4backend0(tag):
+    left, right = get_left_right(tag)
+    try:
+        shape_buf = torch.zeros([1], dtype=torch.short)
+        dist.recv(tensor=shape_buf, src=left)
+        recv_buf = torch.zeros(torch.Size(shape_buf.tolist()))
+        dist.recv(tensor=recv_buf, src=left)
+    except RuntimeError as error:
+        print("runtime error")
+        return None
+    return recv_buf
+
 
 
 
@@ -183,13 +246,15 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
     def backward_rank1():
         residual = None
         batch_idx = 0
-        grad_recv1 = torch.zeros(shapes[1], dtype=torch.int8)
-        #grad_recv1 = torch.HalfTensor(torch.Size(shapes[1]))
+
+        shape_buf = torch.zeros([1], dtype=torch.short)
+        dist.recv(tensor=shape_buf, src=2)
+
+        grad_recv1 = torch.zeros(torch.Size(shape_buf.tolist()))
         dist.recv(tensor=grad_recv1, src=2)
         while True:
             print(" backward batch_idx:" + str(batch_idx))
-            #grad_recv1 = unpack(grad_recv1.cuda(), shapes[1])
-            grad_recv1 = dequantize(grad_recv1.cuda().float())
+            grad_recv1 = unpack(grad_recv1.cuda(), shapes[1])
             #grad_recv1 = grad_recv1.cuda()
             try:
                 inputs, outputs = outputs_queue.get(block=True, timeout=4)
@@ -200,30 +265,31 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             outputs.backward(grad_recv1)
 
             #inputs_grad = quantize(inputs.grad, char=True).cpu()
-            inputs_grad = compress(inputs.grad, residual=residual).cpu()
+            inputs_grad, residual = compress(inputs.grad, residual=residual)
+            inputs_grad = inputs_grad.cpu()
             #inputs_grad = inputs.grad.cpu()
             if batch_idx % 2 == 0:
                  optimizer.step()
                  optimizer.zero_grad()
             batch_idx += 1
             if data_size == batch_idx:
-                transfer(3, inputs_grad, None)
+                transfer4backend1(3, inputs_grad, False)
                 print("backend In send..")
                 break
-            grad_recv1 = transfer(3, inputs_grad, shapes[1])
+            grad_recv1 = transfer4backend1(3, inputs_grad, True)
+
             print("backward send.......")
         print("backard end....")
 
     def backward_rank0(semaphore):
         batch_idx = 0
-        grad_recv = torch.zeros(shapes[0], dtype=torch.int8)
-        #grad_recv = torch.HalfTensor(torch.Size(shapes[0]))
+        shape_buf = torch.zeros([1], dtype=torch.short)
+        dist.recv(tensor=shape_buf, src=1)
+        grad_recv = torch.zeros(torch.Size(shape_buf.tolist()))
         dist.recv(tensor=grad_recv, src=1)
         while True:
             #semaphore.release()
-
-            grad_recv = dequantize(grad_recv.cuda().float())
-            #grad_recv = unpack(grad_recv.cuda(), shapes[0])
+            grad_recv = unpack(grad_recv.cuda(), shapes[0])
             print(" backwardbatch_idx:" + str(batch_idx))
            # grad_recv = grad_recv.cuda()
             try:
@@ -238,10 +304,12 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 optimizer.step()
                 optimizer.zero_grad()
             batch_idx += 1
+
             if data_size == batch_idx:
                 print("eq...")
                 break
-            grad_recv = transfer(4, None, shapes[0])
+            grad_recv = transfer4backend0(4)
+
             print("backward send.....")
         print("backward end..")
 
@@ -262,6 +330,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         print("start to end....")
 
         back_process.join()
+        time.sleep(1)
         e.set()
         print("end....")
 
@@ -315,7 +384,8 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             loss = criterion(outputs, targets)
             loss.backward()
             #quantize_grad = quantize(rec_val.grad, char=True).cpu()
-            quantize_grad = compress(rec_val.grad, residual=residual).cpu()
+            quantize_grad, residual = compress(rec_val.grad, residual=residual)
+            quantize_grad = quantize_grad.cpu()
             #quantize_grad = rec_val.grad.cpu()
             if batch_idx % 2 == 0:
                 optimizer.step()
@@ -332,10 +402,11 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             logger.error("train:" + str(train_loss / (batch_idx + 1)))
             acc_str = "tacc: %.3f" % (100. * correct / total,)
             logger.error(acc_str)
+
             if batch_idx == data_size - 1:
-                transfer(dist.get_rank(), quantize_grad, None)
+                transfer4rank2(dist.get_rank(), quantize_grad, None)
                 continue
-            rec_val = transfer(dist.get_rank(), quantize_grad, shapes[1])
+            rec_val = transfer4rank2(dist.get_rank(), quantize_grad, shapes[1])
 
         #print("\n start to end....")
         e.wait()
@@ -344,74 +415,6 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
 
 
 
-# def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloader):
-#     criterion = nn.CrossEntropyLoss()
-#     criterion.cuda()
-#     layer.eval()
-#
-#     with torch.no_grad():
-#         if dist.get_rank() == 0:
-#             for batch_idx, (inputs, targets) in enumerate(testloader):
-#                 print('batch_idx: ' + str(batch_idx))
-#                 inputs, targets = inputs.cuda(0), targets
-#                 outputs = layer(inputs)
-#                 targets_queue.put(targets.numpy())
-#                 send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
-#                 send_opt.wait()
-#             send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
-#             send_opt.wait()
-#             e.wait()
-#         elif dist.get_rank() == 1:
-#             batch_idx = 0
-#             while True:
-#                 try:
-#                     print("batch_idx:" + str(batch_idx))
-#                     rec_val = torch.zeros([100, 256, 4, 4])  # difference model has difference shape
-#                     dist.recv(tensor=rec_val, src=0)
-#                 except RuntimeError as error:
-#                     send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
-#                     send_opt.wait()
-#                     e.wait()
-#                     break
-#                 outputs = layer(rec_val.cuda())
-#                 send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
-#                 send_opt.wait()
-#                 batch_idx += 1
-#         elif dist.get_rank() == 2:
-#             batch_idx = 0
-#             test_loss = 0
-#             correct = 0
-#             total = 0
-#             save_event.clear()
-#             global best_acc
-#             while True:
-#                 try:
-#                     rec_val = torch.zeros([100, 512, 2, 2])
-#                     dist.recv(tensor=rec_val, src=1)
-#                 except RuntimeError as error:
-#                     print("done....")
-#                     acc = 100. * correct / total
-#                     if acc > best_acc:
-#                         best_acc = acc
-#                         save_event.set()
-#                     e.set()
-#                     break
-#                 outputs = layer(rec_val.cuda(0))
-#                 targets = targets_queue.get(block=True, timeout=2)
-#                 targets = torch.from_numpy(targets).cuda(0)
-#                 loss = criterion(outputs, targets)
-#                 test_loss += loss.item()
-#                 _, predicted = outputs.max(1)
-#                 total += targets.size(0)
-#                 correct += predicted.eq(targets).sum().item()
-#
-#                 progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-#                              % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-#                 #if batch_idx % 10 == 0:
-#                 logger.error("eval:" + str(test_loss / (batch_idx + 1)))
-#                 acc_str = "eacc: %.3f" % (100. * correct / total,)
-#                 logger.error(acc_str)
-#                 batch_idx += 1
 
 
 
