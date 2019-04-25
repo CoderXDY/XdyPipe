@@ -33,6 +33,7 @@ import random
 
 
 def compress(input, num_bits=8, prop=1000, residual=None):
+
     input = input.view(-1)
     if residual is None:
         residual = torch.zeros(input.size(), device=torch.device('cuda:0'))
@@ -316,6 +317,8 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             loss = criterion(outputs, targets)
             loss.backward()
             #quantize_grad = quantize(rec_val.grad, char=True).cpu()
+            # for_view = rec_val.grad.view(-1).tolist()
+            # logger.error("grad: " + str(for_view))
             quantize_grad, residual = compress(rec_val.grad, residual=residual)
             quantize_grad = quantize_grad.cpu()
             #quantize_grad = rec_val.grad.cpu()
