@@ -1,0 +1,13 @@
+import torch
+import matplotlib.pyplot as plt
+import numpy as np
+from visdom import Visdom
+import os
+from collections import Counter
+lines = []
+with open('../grad.log', 'r+') as f:
+    line = f.readline()
+l = [float(x.strip()) for x in line[7: len(line) -3].split(',')]
+tensor = torch.Tensor(l)
+vis = Visdom()
+vis.bar(X=tensor.view(-1).numpy())
