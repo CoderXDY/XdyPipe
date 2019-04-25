@@ -32,6 +32,44 @@ import random
 
 
 
+def piecewise_quantize(input, num_bits=8, threshold=0.0005, prop=1000):
+    qmin = 2.
+    qmax = 2. ** (num_bits - 1) - 1.
+
+    scale = qmax - qmin
+
+    fraction_mul_qval = torch.round(input.mul(scale).mul(prop))
+
+    new_input = torch.where(torch.abs(input) < threshold, fraction_mul_qval, torch.zeros(input.size(), device=torch.device('cuda:0')))
+
+
+    return new_input.char(), None
+
+
+
+def de_piecewise_quantize(input, num_bits=8, threshold=0.0005, prop=1000):
+
+    input = input.float()
+    qmin = 2.
+    qmax = 2. ** (num_bits - 1) - 1.
+    scale = qmax - qmin
+    two_tensor = input.div(prop * scale)
+    random_tensor = torch.from_numpy(np.random.randint(0, 2, size=input.size())).cuda()
+    one_tensor = torch.where(input == 0, random_tensor.mul(threshold).div(2), torch.zeros(input.size()))
+
+    new_input = torch.where(input != 0, two_tensor, one_tensor)
+
+    return new_input
+
+
+
+
+
+
+
+
+
+
 def compress(input, num_bits=8, prop=1000, residual=None):
 
     input = input.view(-1)
@@ -190,7 +228,8 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         while True:
             print(" backward batch_idx:" + str(batch_idx))
             #grad_recv1 = unpack(grad_recv1.cuda(), shapes[1])
-            grad_recv1 = dequantize(grad_recv1.cuda().float())
+            #grad_recv1 = dequantize(grad_recv1.cuda().float())
+            grad_recv1 = de_piecewise_quantize(grad_recv1.cuda())
             #grad_recv1 = grad_recv1.cuda()
             try:
                 inputs, outputs = outputs_queue.get(block=True, timeout=4)
@@ -201,7 +240,8 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             outputs.backward(grad_recv1)
 
             #inputs_grad = quantize(inputs.grad, char=True).cpu()
-            inputs_grad, residual = compress(inputs.grad, residual=residual)
+            #inputs_grad, residual = compress(inputs.grad, residual=residual)
+            inputs_grad = piecewise_quantize(inputs.grad)
             inputs_grad = inputs_grad.cpu()
             #inputs_grad = inputs.grad.cpu()
             if batch_idx % 2 == 0:
@@ -224,7 +264,8 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         while True:
             #semaphore.release()
 
-            grad_recv = dequantize(grad_recv.cuda().float())
+            #grad_recv = dequantize(grad_recv.cuda().float())
+            grad_recv = de_piecewise_quantize(grad_recv.cuda())
             #grad_recv = unpack(grad_recv.cuda(), shapes[0])
             print(" backwardbatch_idx:" + str(batch_idx))
            # grad_recv = grad_recv.cuda()
@@ -319,7 +360,8 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             #quantize_grad = quantize(rec_val.grad, char=True).cpu()
             # for_view = rec_val.grad.view(-1).tolist()
             # logger.error("grad: " + str(for_view))
-            quantize_grad, residual = compress(rec_val.grad, residual=residual)
+            #quantize_grad, residual = compress(rec_val.grad, residual=residual)
+            quantize_grad = piecewise_quantize(rec_val.grad)
             quantize_grad = quantize_grad.cpu()
             #quantize_grad = rec_val.grad.cpu()
             if batch_idx % 2 == 0:
