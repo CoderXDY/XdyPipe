@@ -43,7 +43,7 @@ def piecewise_quantize(input, num_bits=8, threshold=0.0005, prop=1000):
     new_input = torch.where(torch.abs(input) < threshold, fraction_mul_qval, torch.zeros(input.size(), device=torch.device('cuda:0')))
 
 
-    return new_input.char(), None
+    return new_input.char()
 
 
 
@@ -54,8 +54,8 @@ def de_piecewise_quantize(input, num_bits=8, threshold=0.0005, prop=1000):
     qmax = 2. ** (num_bits - 1) - 1.
     scale = qmax - qmin
     two_tensor = input.div(prop * scale)
-    random_tensor = torch.from_numpy(np.random.randint(0, 2, size=input.size())).cuda()
-    one_tensor = torch.where(input == 0, random_tensor.mul(threshold).div(2), torch.zeros(input.size()))
+    random_tensor = torch.from_numpy(np.random.randint(0, 2, size=input.size())).float().cuda()
+    one_tensor = torch.where(input == 0, random_tensor.mul(threshold).div(2), torch.zeros(input.size(), device=torch.device('cuda:0')))
 
     new_input = torch.where(input != 0, two_tensor, one_tensor)
 
