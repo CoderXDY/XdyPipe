@@ -10,4 +10,7 @@ with open('../new_grad.txt', 'r+') as f:
 l = [float(x.strip()) for x in line[7: len(line) -3].split(',')]
 tensor = torch.Tensor(l)
 vis = Visdom()
-vis.bar(X=tensor.view(-1).numpy())
+#vis.bar(X=tensor.view(-1).numpy())
+vis.line(Y=tensor.view(-1).numpy()[0:])
+print(tensor.view(-1).numpy()[0:100])
+#vis.line(Y=np.array(list(range(50))))
