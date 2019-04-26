@@ -358,3 +358,140 @@ if batch_idx % args.buffer_size == 0:
 else:
     progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                  % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+
+
+
+
+
+"""
+    # q_part1 = torch.round(input_abs.mul(2).div(threshold).mul(sign))
+    # q_part2 = torch.round(input_abs.mul(fra).add(2).mul(sign))
+    # 
+    # new_input = torch.where(input_abs < threshold, q_part1, q_part2)
+"""
+
+
+
+
+
+
+
+
+def piecewise_quantize(input, num_bits=8, residual=None, prop=1000):
+    sign = input.sign()
+    ab = input.abs()
+    v_max = torch.max(ab)
+    qmin = 0.
+    qmax = 2. ** (num_bits - 1) - 1.
+    tensor = ab.mul(qmax - qmin).div(v_max).mul(sign).cpu()
+
+    return torch.cat([tensor.view(-1), torch.Tensor([v_max])]), None
+def de_piecewise_quantize(input, shape, num_bits=8, prop=1000):
+    input, v_max = input[0: -1], input[-1]
+    input = input.view(shape)
+    sign = input.sign()
+    ab = input.abs()
+    qmin = 0.
+    qmax = 2. ** (num_bits - 1) - 1.
+    return ab.mul(v_max).div(qmax - qmin).mul(sign)
+
+
+
+def piecewise_quantize(input, num_bits=8, residual=None, prop=1000):
+    qmin = 2.
+    qmax = 2. ** (num_bits - 1) - 1.
+
+    scale = qmax - qmin
+
+    fraction_mul_qval = torch.round(input.mul(scale).mul(prop))
+    ####
+    # input.abs_()
+    # fraction_mul_qval2 = input.mul(scale)#.mul(prop)
+    # v_max = torch.max(torch.abs(input))
+    # print(v_max)
+    # print("-----")
+    # fra = max((v_max - threshold), 1e-8)
+    # print(fra)
+    #
+    # q2 = torch.round(fraction_mul_qval2.div(fra)) + 2
+    # idx = q2.lt(2)
+    # temp = fraction_mul_qval2.div(fra)[idx]
+    # print(temp)
+    ####
+    threshold = torch.max(torch.abs(input)) / 3
+    new_input = torch.where(torch.abs(input) < threshold, fraction_mul_qval, torch.zeros(input.size(), device=torch.device('cuda:0')))
+
+
+    return torch.cat([new_input.view(-1).cpu(), torch.Tensor([threshold])]), None
+
+
+    # if not torch.is_tensor(residual):
+    #     residual = torch.zeros(input.size(), device=torch.device('cuda:0'))
+    #
+    # input.add_(residual)
+    #
+    # qmin = 2.
+    # qmax = 2. ** (num_bits - 1) - 1.
+    #
+    # scale = qmax - qmin
+    # sign = input.sign()
+    # input_abs = torch.abs(input)
+    # v_max = torch.max(input_abs)
+    # threshold = v_max / 3
+    # dis = max((v_max - threshold), 1e-8)
+    # fra = scale / dis
+    # print("vmax:" + str(v_max) + "dis:" + str(dis)  + " thr:" + str(threshold))
+    # part1_idx = input_abs.lt(threshold)
+    # input_abs[part1_idx] = torch.round(input_abs[part1_idx].mul(2).div(threshold))
+    # part2_idx = input_abs.ge(threshold)
+    # input_abs[part2_idx] = torch.round(input_abs[part2_idx].mul(fra)) #.add(2)
+    # input_abs.mul_(sign)
+    #
+    #
+    # residual = torch.where(input_abs == 0, input, torch.zeros(input.size(), device=torch.device('cuda:0')))
+    #
+    #
+    #
+    # print(input_abs[input_abs.eq(0)].size())
+    # result = torch.cat([input_abs.view(-1).cpu(), torch.Tensor([v_max])])
+    # print("result_max: " + str(result[-1]))
+    # return result, residual
+
+
+
+def de_piecewise_quantize(input, shape, num_bits=8, prop=1000):
+    input, v_max = input[0: -1], input[-1]
+    input = input.view(shape)
+    input = input.float()
+    qmin = 2.
+    qmax = 2. ** (num_bits - 1) - 1.
+    scale = qmax - qmin
+    input.div_(prop * scale)
+    # two_tensor = input.div(prop * scale)
+    # random_tensor = torch.from_numpy(np.random.randint(0, 2, size=input.size())).float().cuda()
+    # one_tensor = torch.where(input == 0, random_tensor.mul(threshold).div(2), torch.zeros(input.size(), device=torch.device('cuda:0')))
+    #
+    # new_input = torch.where(input != 0, two_tensor, one_tensor)
+    #
+    # return new_input
+    return input
+
+
+    # qmin = 2.
+    # qmax = 2. ** (num_bits - 1) - 1.
+    # scale = qmax - qmin
+    # input, v_max = input[0: -1], input[-1]
+    # print("v_max:" + str(v_max))
+    # input = input.view(shape)
+    # threshold = v_max / 3
+    # dis = max((v_max - threshold), 1e-8)
+    # sign = input.sign()
+    # input_abs = input.abs()
+    # fra = dis / scale
+    # part1_idx = input_abs.le(2)#lt if neet to sub 2
+    # input_abs[part1_idx] = input_abs[part1_idx].mul(threshold).div(2)#set 0???
+    # part2_idx = input_abs.gt(2)
+    # input_abs[part2_idx] = input_abs[part2_idx].mul(fra)#- 2
+    # input_abs.mul_(sign)
+    #
+    # return input_abs
