@@ -50,13 +50,14 @@ def piecewise_quantize(input, num_bits=8, residual=None, prop=1000):
 
     fraction_mul_qval = torch.round(input.mul(scale).mul(prop))
 
+
     threshold = torch.max(torch.abs(input)) * 0.80
 
     id_part1 = input.lt(threshold)
     id_part2 = input.ge(threshold)
     input[id_part1] = torch.round(input[id_part1].mul(2).mul(prop))
     input[id_part2] = fraction_mul_qval[id_part2]
-    print(input[input.eq(0.)].size())
+    #print(input[input.eq(0.)].size())
     return torch.cat([input.view(-1).cpu(), torch.Tensor([threshold])]), None
 
 
