@@ -33,156 +33,156 @@ import random
 
 
 
-def tensor_len(shape):
-    length = 1
-    for i in range(len(shape)):
-        length *= shape[i]
-    return length
-
-
-
-"""
-def piecewise_quantize(input, num_bits=8, fra_bits=6, residual=None, prop=1000, drop=0.8):
-    qmin = 2. ** fra_bits
-    qmax = 2. ** num_bits - 1.
-    scale = qmax - qmin
-    ab = input.abs()
-    threshold = torch.max(ab) * drop
-    id_part1 = ab.lt(threshold)
-    id_part2 = ab.ge(threshold)
-    input[id_part1] = torch.round(input[id_part1].mul(qmin).mul(prop))
-    input[id_part2] = torch.round(input[id_part2].mul(scale).mul(prop))
-    input = input.cpu()
-    print(input[input.eq(0.)].size())
-    return input, None
-
-
-
-
-
-def de_piecewise_quantize(input, num_bits=8, fra_bits= 6, prop=1000):
-
-    qmin = 2. ** fra_bits
-    qmax = 2. ** num_bits - 1.
-    scale = qmax - qmin
-    ab = input.abs()
-    input[ab.le(qmin)] = input[ab.le(qmin)].div(qmin * prop)
-    input[ab.gt(qmin)] = input[ab.gt(qmin)].div(scale * prop)
-    return input
-
-"""
-
-def piecewise_quantize(input, logger, num_bits=8, fra_bits=6, drop=0.1, residual=None):
-    qmin = 2. ** fra_bits
-    qmax = 2. ** num_bits - 1.
-    scale = qmax - qmin
-    sign = input.sign()
-    ab = input.abs()
-    v_max = torch.max(ab)
-    threshold = v_max * drop
-    id_part1 = ab.lt(threshold)
-    id_part2 = ab.ge(threshold)
-    ab[id_part1] = ab[id_part1].mul(qmin).div(threshold)
-    fra = scale / (v_max - threshold)
-    ab[id_part2] = qmax - ((v_max - ab[id_part2]).mul(fra))
-    ab.round_()
-    ab.mul_(sign)
-    ab = ab.cpu()
-    logger.error("zero:" + str(ab[ab.eq(0.)].size()))
-    return torch.cat([ab.view(-1), torch.Tensor([v_max]).cpu(), torch.Tensor([threshold]).cpu()]), None
-
-
-def de_piecewise_quantize(input, shapes, num_bits=8, fra_bits=6):
-    input, v_max, threshold = input[:-2], input[-2], input[-1]
-    input = input.view(shapes)
-    qmin = 2. ** fra_bits
-    qmax = 2. ** num_bits - 1.
-    scale = qmax - qmin
-    sign = input.sign()
-    ab = input.abs()
-    id_part1 = ab.lt(qmin)
-    id_part2 = ab.ge(qmin)
-    ab[id_part1] = ab[id_part1].mul(threshold).div(qmin)
-    fra = (v_max - threshold) / scale
-    ab[id_part2] = v_max - ((qmax - ab[id_part2]).mul(fra))
-    return ab.mul(sign)
-
-
-
-
-
-def compress(input, num_bits=8, prop=1000, residual=None):
-
-    input = input.view(-1)
-    if residual is None:
-        residual = torch.zeros(input.size(), device=torch.device('cuda:0'))
-    input.add_(residual)
-    threshold = input.topk(int(input.nelement() * 0.01) if int(input.nelement() * 0.01) != 0 else 1)[0][-1]
-    residual = torch.where(abs(input) < threshold, input,
-                           torch.zeros(input.size(), device=torch.device('cuda:0')))
-    input[abs(input) < threshold] = 0.
-
-    qmin = 0.
-    qmax = 2. ** (num_bits - 1) - 1.
-    scale = qmax - qmin
-    input = torch.round(input.mul(scale).mul(prop))
-
-    #indexs = input.nonzero().t()
-    #values = input[indexs[0]]
-    #sparse_tensor = torch.cat([indexs[0].float(), values])
-    #return sparse_tensor.half()
-    return input.char(), residual
-
-def unpack(input, shape):
-    input = input.float()
-    half_size = int(len(input) / 2)
-    indexs = input[: half_size].view(1, half_size).long()
-    values = input[half_size:]
-    for i in range(len(shape)):
-        length *= shape[i]
-    sparse_tensor = torch.sparse.FloatTensor(indexs, values, torch.Size([length]))
-    return sparse_tensor.to_dense().view(shape)
-
-
-
-
-
-# def quantize(input, num_bits=8, char=False, prop=1000):
+# def tensor_len(shape):
+#     length = 1
+#     for i in range(len(shape)):
+#         length *= shape[i]
+#     return length
+#
+#
+#
+# """
+# def piecewise_quantize(input, num_bits=8, fra_bits=6, residual=None, prop=1000, drop=0.8):
+#     qmin = 2. ** fra_bits
+#     qmax = 2. ** num_bits - 1.
+#     scale = qmax - qmin
+#     ab = input.abs()
+#     threshold = torch.max(ab) * drop
+#     id_part1 = ab.lt(threshold)
+#     id_part2 = ab.ge(threshold)
+#     input[id_part1] = torch.round(input[id_part1].mul(qmin).mul(prop))
+#     input[id_part2] = torch.round(input[id_part2].mul(scale).mul(prop))
+#     input = input.cpu()
+#     print(input[input.eq(0.)].size())
+#     return input, None
+#
+#
+#
+#
+#
+# def de_piecewise_quantize(input, num_bits=8, fra_bits= 6, prop=1000):
+#
+#     qmin = 2. ** fra_bits
+#     qmax = 2. ** num_bits - 1.
+#     scale = qmax - qmin
+#     ab = input.abs()
+#     input[ab.le(qmin)] = input[ab.le(qmin)].div(qmin * prop)
+#     input[ab.gt(qmin)] = input[ab.gt(qmin)].div(scale * prop)
+#     return input
+#
+# """
+#
+# def piecewise_quantize(input, logger, num_bits=8, fra_bits=6, drop=0.1, residual=None):
+#     qmin = 2. ** fra_bits
+#     qmax = 2. ** num_bits - 1.
+#     scale = qmax - qmin
+#     sign = input.sign()
+#     ab = input.abs()
+#     v_max = torch.max(ab)
+#     threshold = v_max * drop
+#     id_part1 = ab.lt(threshold)
+#     id_part2 = ab.ge(threshold)
+#     ab[id_part1] = ab[id_part1].mul(qmin).div(threshold)
+#     fra = scale / (v_max - threshold)
+#     ab[id_part2] = qmax - ((v_max - ab[id_part2]).mul(fra))
+#     ab.round_()
+#     ab.mul_(sign)
+#     ab = ab.cpu()
+#     logger.error("zero:" + str(ab[ab.eq(0.)].size()))
+#     return torch.cat([ab.view(-1), torch.Tensor([v_max]).cpu(), torch.Tensor([threshold]).cpu()]), None
+#
+#
+# def de_piecewise_quantize(input, shapes, num_bits=8, fra_bits=6):
+#     input, v_max, threshold = input[:-2], input[-2], input[-1]
+#     input = input.view(shapes)
+#     qmin = 2. ** fra_bits
+#     qmax = 2. ** num_bits - 1.
+#     scale = qmax - qmin
+#     sign = input.sign()
+#     ab = input.abs()
+#     id_part1 = ab.lt(qmin)
+#     id_part2 = ab.ge(qmin)
+#     ab[id_part1] = ab[id_part1].mul(threshold).div(qmin)
+#     fra = (v_max - threshold) / scale
+#     ab[id_part2] = v_max - ((qmax - ab[id_part2]).mul(fra))
+#     return ab.mul(sign)
+#
+#
+#
+#
+#
+# def compress(input, num_bits=8, prop=1000, residual=None):
+#
+#     input = input.view(-1)
+#     if residual is None:
+#         residual = torch.zeros(input.size(), device=torch.device('cuda:0'))
+#     input.add_(residual)
+#     threshold = input.topk(int(input.nelement() * 0.01) if int(input.nelement() * 0.01) != 0 else 1)[0][-1]
+#     residual = torch.where(abs(input) < threshold, input,
+#                            torch.zeros(input.size(), device=torch.device('cuda:0')))
+#     input[abs(input) < threshold] = 0.
+#
 #     qmin = 0.
 #     qmax = 2. ** (num_bits - 1) - 1.
 #     scale = qmax - qmin
 #     input = torch.round(input.mul(scale).mul(prop))
+#
+#     #indexs = input.nonzero().t()
+#     #values = input[indexs[0]]
+#     #sparse_tensor = torch.cat([indexs[0].float(), values])
+#     #return sparse_tensor.half()
+#     return input.char(), residual
+#
+# def unpack(input, shape):
+#     input = input.float()
+#     half_size = int(len(input) / 2)
+#     indexs = input[: half_size].view(1, half_size).long()
+#     values = input[half_size:]
+#     for i in range(len(shape)):
+#         length *= shape[i]
+#     sparse_tensor = torch.sparse.FloatTensor(indexs, values, torch.Size([length]))
+#     return sparse_tensor.to_dense().view(shape)
+#
+#
+#
+#
+#
+# # def quantize(input, num_bits=8, char=False, prop=1000):
+# #     qmin = 0.
+# #     qmax = 2. ** (num_bits - 1) - 1.
+# #     scale = qmax - qmin
+# #     input = torch.round(input.mul(scale).mul(prop))
+# #     if char:
+# #         input = input.char()
+# #     return input
+#
+#     #b = torch.abs(a)
+#     #c = torch.max(b)
+#     #torch.round(torch.abs(a).mul(255).div(c))
+#
+# def dequantize(input, num_bits=8, prop=1000):
+#     if input.type() != 'torch.FloatTensor':
+#         input = input.float()
+#     qmin = 0.
+#     qmax = 2. ** (num_bits - 1) - 1.
+#     scale = qmax - qmin
+#     input.div_(prop * scale)
+#     return input
+#
+#
+#
+# def q_act(input, num_bits=8, char=False):
+#     qmax = 2. ** num_bits - 1.
+#     input = torch.round(input.mul(qmax)).div(qmax)
 #     if char:
 #         input = input.char()
 #     return input
-
-    #b = torch.abs(a)
-    #c = torch.max(b)
-    #torch.round(torch.abs(a).mul(255).div(c))
-
-def dequantize(input, num_bits=8, prop=1000):
-    if input.type() != 'torch.FloatTensor':
-        input = input.float()
-    qmin = 0.
-    qmax = 2. ** (num_bits - 1) - 1.
-    scale = qmax - qmin
-    input.div_(prop * scale)
-    return input
-
-
-
-def q_act(input, num_bits=8, char=False):
-    qmax = 2. ** num_bits - 1.
-    input = torch.round(input.mul(qmax)).div(qmax)
-    if char:
-        input = input.char()
-    return input
-
-def dq_act(input, min=-0.0020, max=0.0020):
-    # input = input.float()
-    # noise = input.new(input.size()).uniform_(min, max)
-    # input.add_(noise)
-    return input
+#
+# def dq_act(input, min=-0.0020, max=0.0020):
+#     # input = input.float()
+#     # noise = input.new(input.size()).uniform_(min, max)
+#     # input.add_(noise)
+#     return input
 
 
 def get_left_right(tag):
@@ -200,7 +200,7 @@ def get_left_right(tag):
     return left, right
 
 
-def transfer(tag, send_buf, shape, half=False):
+def transfer(tag, send_buf, shape):
 
     if shape == None:
         left, right = get_left_right(tag)
@@ -210,43 +210,7 @@ def transfer(tag, send_buf, shape, half=False):
     elif not torch.is_tensor(send_buf):
         left, right = get_left_right(tag)
         try:
-            if half:
-                recv_buf = torch.HalfTensor(torch.Size(shape))
-            else:
-                recv_buf = torch.zeros(shape)#, dtype=torch.int8
-            dist.recv(tensor=recv_buf, src=left)
-        except RuntimeError as error:
-            print("runtime error..")
-            return None
-        return recv_buf
-
-    else:
-        left, right = get_left_right(tag)
-        send_opt = dist.isend(tensor=send_buf, dst=right)
-
-        try:
-            if half:
-                recv_buf = torch.HalfTensor(torch.Size(shape))
-            else:
-                recv_buf = torch.zeros(shape)
-            dist.recv(tensor=recv_buf, src=left)
-        except RuntimeError as error:
-            print("runtime error")
-            return None
-        send_opt.wait()
-        return recv_buf
-
-def transfer2(tag, send_buf, shape):
-
-    if shape == None:
-        left, right = get_left_right(tag)
-        send_opt = dist.isend(tensor=send_buf, dst=right)
-        send_opt.wait()
-        return None
-    elif not torch.is_tensor(send_buf):
-        left, right = get_left_right(tag)
-        try:
-            recv_buf = torch.zeros(shape)
+            recv_buf = torch.zeros(shape)  # , dtype=torch.int8
             dist.recv(tensor=recv_buf, src=left)
         except RuntimeError as error:
             print("runtime error..")
@@ -265,6 +229,36 @@ def transfer2(tag, send_buf, shape):
             return None
         send_opt.wait()
         return recv_buf
+
+# def transfer2(tag, send_buf, shape):
+#
+#     if shape == None:
+#         left, right = get_left_right(tag)
+#         send_opt = dist.isend(tensor=send_buf, dst=right)
+#         send_opt.wait()
+#         return None
+#     elif not torch.is_tensor(send_buf):
+#         left, right = get_left_right(tag)
+#         try:
+#             recv_buf = torch.zeros(shape)
+#             dist.recv(tensor=recv_buf, src=left)
+#         except RuntimeError as error:
+#             print("runtime error..")
+#             return None
+#         return recv_buf
+#
+#     else:
+#         left, right = get_left_right(tag)
+#         send_opt = dist.isend(tensor=send_buf, dst=right)
+#
+#         try:
+#             recv_buf = torch.zeros(shape)
+#             dist.recv(tensor=recv_buf, src=left)
+#         except RuntimeError as error:
+#             print("runtime error")
+#             return None
+#         send_opt.wait()
+#         return recv_buf
 
 
 
@@ -291,16 +285,10 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
 
     def backward_rank1():
         batch_idx = 0
-        ten_len = tensor_len(shapes[1])
         grad_recv1 = torch.zeros(shapes[1])
-        #grad_recv1 = torch.HalfTensor(torch.Size(shapes[1]))
-        #grad_recv1 = torch.zeros(ten_len + 2)#shapes[1]
         dist.recv(tensor=grad_recv1, src=2)
         while True:
             print(" backward batch_idx:" + str(batch_idx))
-            #grad_recv1 = unpack(grad_recv1.cuda(), shapes[1])
-            #grad_recv1 = dequantize(grad_recv1.cuda().float())
-            #grad_recv1 = de_piecewise_quantize(grad_recv1.cuda(), shapes[1])
             grad_recv1 = grad_recv1.cuda()
             try:
                 inputs, outputs = outputs_queue.get(block=True, timeout=4)
@@ -309,37 +297,23 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 break
             inputs.requires_grad_()
             outputs.backward(grad_recv1)
-
-            #inputs_grad = quantize(inputs.grad, char=True).cpu()
-            #inputs_grad, residual = compress(inputs.grad, residual=residual)
-            #inputs_grad, residual = piecewise_quantize(inputs.grad, logger=logger, residual=residual)
-            #inputs_grad = inputs_grad.cpu()
-            #inputs_grad = inputs.grad.cpu()
             if batch_idx % 2 == 0:
                  optimizer.step()
                  optimizer.zero_grad()
             batch_idx += 1
             if data_size == batch_idx:
-                transfer2(3, inputs_grad, None)
+                transfer(3, inputs.grad.cpu(), None)
                 print("backend In send..")
                 break
-            grad_recv1 = transfer(3, inputs_grad, shapes[1])#shapes[1]
+            grad_recv1 = transfer(3, inputs.grad.cpu(), shapes[1])#shapes[1]
             print("backward send.......")
         print("backard end....")
 
     def backward_rank0(semaphore):
         batch_idx = 0
-        #ten_len = tensor_len()
         grad_recv = torch.zeros(shapes[0])
-        #grad_recv = torch.zeros(shapes[0], dtype=torch.int8)
-        #grad_recv = torch.HalfTensor(torch.Size(shapes[0]))
         dist.recv(tensor=grad_recv, src=1)
         while True:
-            #semaphore.release()
-
-            #grad_recv = dequantize(grad_recv.cuda().float())
-            #grad_recv = de_piecewise_quantize(grad_recv.cuda(), shapes[0])
-            #grad_recv = unpack(grad_recv.cuda(), shapes[0])
             print(" backwardbatch_idx:" + str(batch_idx))
             grad_recv = grad_recv.cuda()
             try:
@@ -357,7 +331,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             if data_size == batch_idx:
                 print("eq...")
                 break
-            grad_recv = transfer(4, None, shpaes[0])#shapes[0]
+            grad_recv = transfer(4, None, shapes[0])#shapes[0]
             print("backward send.....")
         print("backward end..")
 
@@ -372,7 +346,6 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             inputs = inputs.cuda()
             outputs = layer(inputs)#
             outputs_queue.put(outputs)
-            #outputs = q_act(outputs, char=True)
             transfer(dist.get_rank(), outputs.cpu(), None)
             print("send........")
         print("start to end....")
@@ -392,12 +365,10 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         back_process.start()
         for index, (_, targets) in enumerate(trainloader):
             print("batch_idx:" + str(index))
-            #rec_val = dq_act(rec_val)
             rec_val = rec_val.cuda()
             rec_val.requires_grad_()
             outputs = layer(rec_val)
             outputs_queue.put([rec_val, outputs])
-            #outputs = q_act(outputs, char=True)
             if index == data_size - 1:
                 transfer(dist.get_rank(), outputs.cpu(), None)
                 print("the last send........")
@@ -422,7 +393,6 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             rec_val = torch.zeros(shapes[1])
             dist.recv(tensor=rec_val, src=1)
         for batch_idx, (_, targets) in enumerate(trainloader):
-            #rec_val = dq_act(rec_val)
             rec_val = rec_val.cuda()
             rec_val.requires_grad_()
             outputs = layer(rec_val)
@@ -430,13 +400,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             targets = targets.cuda()
             loss = criterion(outputs, targets)
             loss.backward()
-            #quantize_grad = quantize(rec_val.grad, char=True).cpu()
-            # for_view = rec_val.grad.view(-1).tolist()
-            # logger.error("grad: " + str(for_view))
-            #quantize_grad, residual = compress(rec_val.grad, residual=residual)
-            #quantize_grad, residual = piecewise_quantize(rec_val.grad, logger=logger, residual=residual)
-            #quantize_grad = quantize_grad.cpu()
-            #quantize_grad = rec_val.grad.cpu()
+
             if batch_idx % 2 == 0:
                 optimizer.step()
                 train_loss += loss.item()
@@ -603,8 +567,8 @@ def eval(layer, logger, e, save_event, data_size, testloader):
 
 
 def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader):
-    logger = logging.getLogger(args.model + '-fbp3-rank-' + str(dist.get_rank()))
-    file_handler = logging.FileHandler(args.model + '-fbp3-rank-' + str(dist.get_rank()) + '.log')
+    logger = logging.getLogger(args.model + '-fbp3loss-rank-' + str(dist.get_rank()))
+    file_handler = logging.FileHandler(args.model + '-fbp3loss-rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
@@ -626,9 +590,9 @@ def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_eve
             state = {
                 'net': layer.state_dict(),
                 'acc': best_acc,
-                'epoch': epoch,
+                'epoch': 0,
             }
-            torch.save(state, './checkpoint/' + args.model + '-fbp3-rank-' + str(r) + '_ckpt.t7')
+            torch.save(state, './checkpoint/' + args.model + '-fbp3loss-rank-' + str(r) + '_ckpt.t7')
         time.sleep(1)
     if r == 0 or r == 1:
         global_event.wait()
@@ -730,7 +694,7 @@ if __name__ == "__main__":
     if args.resume:
         print('==> Resuming from checkpoint..')
         assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-        checkpoint = torch.load('./checkpoint/' + args.model + '-fbp3-rank-' + str(args.rank) + '_ckpt.t7')
+        checkpoint = torch.load('./checkpoint/' + args.model + '-fbp3loss-rank-' + str(args.rank) + '_ckpt.t7')
         layer.load_state_dict(checkpoint['net'])
         best_acc = checkpoint['acc']
         start_epoch = checkpoint['epoch']

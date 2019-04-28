@@ -72,7 +72,7 @@ def de_piecewise_quantize(input, num_bits=8, fra_bits= 6, prop=1000):
 
 """
 
-def piecewise_quantize(input, num_bits=8, fra_bits=6, drop=0.1, residual=None):
+def piecewise_quantize(input, logger, num_bits=8, fra_bits=6, drop=0.1, residual=None):
     qmin = 2. ** fra_bits
     qmax = 2. ** num_bits - 1.
     scale = qmax - qmin
@@ -88,6 +88,7 @@ def piecewise_quantize(input, num_bits=8, fra_bits=6, drop=0.1, residual=None):
     ab.round_()
     ab.mul_(sign)
     ab = ab.cpu()
+    logger.error("zero:" + str(ab[ab.eq(0.)].size()))
     return torch.cat([ab.view(-1), torch.Tensor([v_max]).cpu(), torch.Tensor([threshold]).cpu()]), None
 
 
@@ -312,7 +313,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
 
             #inputs_grad = quantize(inputs.grad, char=True).cpu()
             #inputs_grad, residual = compress(inputs.grad, residual=residual)
-            inputs_grad, residual = piecewise_quantize(inputs.grad, residual=residual)
+            inputs_grad, residual = piecewise_quantize(inputs.grad, logger=logger, residual=residual)
             #inputs_grad = inputs_grad.cpu()
             #inputs_grad = inputs.grad.cpu()
             if batch_idx % 2 == 0:
@@ -434,7 +435,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             # for_view = rec_val.grad.view(-1).tolist()
             # logger.error("grad: " + str(for_view))
             #quantize_grad, residual = compress(rec_val.grad, residual=residual)
-            quantize_grad, residual = piecewise_quantize(rec_val.grad, residual=residual)
+            quantize_grad, residual = piecewise_quantize(rec_val.grad, logger=logger, residual=residual)
             #quantize_grad = quantize_grad.cpu()
             #quantize_grad = rec_val.grad.cpu()
             if batch_idx % 2 == 0:
@@ -464,6 +465,67 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
 
 
 
+# def eval(layer, logger, e, save_event, data_size, testloader):
+#     criterion = nn.CrossEntropyLoss()
+#     criterion.cuda()
+#     layer.eval()
+#     with torch.no_grad():
+#         if dist.get_rank() == 0:
+#             for batch_idx, (inputs, targets) in enumerate(testloader):
+#                 print('batch_idx: ' + str(batch_idx))
+#                 inputs = inputs.cuda(0)
+#                 outputs = layer(inputs)
+#                 outputs = q_act(outputs, char=True)
+#                 dist.send(tensor=outputs.cpu(), dst=1)
+#                 print("send.....")
+#
+#             e.wait()
+#         elif dist.get_rank() == 1:
+#             batch_idx = 0
+#             while data_size > batch_idx:
+#                 print("batch_idx:" + str(batch_idx))
+#                 rec_val = torch.zeros([100, 256, 4, 4], dtype=torch.int8)  # difference model has difference shape
+#                 dist.recv(tensor=rec_val, src=0)
+#                 print("after recv....")
+#                 rec_val = dq_act(rec_val)
+#                 outputs = layer(rec_val.cuda())
+#                 outputs = q_act(outputs, char=True)
+#                 dist.send(tensor=outputs.cpu(), dst=2)
+#                 batch_idx += 1
+#                 print("send...")
+#
+#             e.wait()
+#         elif dist.get_rank() == 2:
+#             test_loss = 0
+#             correct = 0
+#             total = 0
+#             save_event.clear()
+#             global best_acc
+#
+#             for batch_idx, (inputs, targets) in enumerate(testloader):
+#                 rec_val = torch.zeros([100, 512, 2, 2], dtype=torch.int8)
+#                 dist.recv(tensor=rec_val, src=1)
+#                 rec_val = dq_act(rec_val)
+#                 outputs = layer(rec_val.cuda(0))
+#                 targets = targets.cuda()
+#                 loss = criterion(outputs, targets)
+#                 test_loss += loss.item()
+#                 _, predicted = outputs.max(1)
+#                 total += targets.size(0)
+#                 correct += predicted.eq(targets).sum().item()
+#
+#                 progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+#                              % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+#                 logger.error("eval:" + str(test_loss / (batch_idx + 1)))
+#                 acc_str = "eacc: %.3f" % (100. * correct / total,)
+#                 logger.error(acc_str)
+#             time.sleep(1)
+#             acc = 100. * correct / total
+#             if acc > best_acc:
+#                 best_acc = acc
+#                 save_event.set()
+#             time.sleep(1)
+#             e.set()
 
 
 
@@ -542,8 +604,8 @@ def eval(layer, logger, e, save_event, data_size, testloader):
 
 
 def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader):
-    logger = logging.getLogger(args.model + '-ringours3-rank-' + str(dist.get_rank()))
-    file_handler = logging.FileHandler(args.model + '-ringours3-rank-' + str(dist.get_rank()) + '.log')
+    logger = logging.getLogger(args.model + '-fbp3-rank-' + str(dist.get_rank()))
+    file_handler = logging.FileHandler(args.model + '-fbp3-rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
@@ -567,7 +629,7 @@ def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_eve
                 'acc': best_acc,
                 'epoch': epoch,
             }
-            torch.save(state, './checkpoint/' + args.model + '-ringours3-rank-' + str(r) + '_ckpt.t7')
+            torch.save(state, './checkpoint/' + args.model + '-fbp3-rank-' + str(r) + '_ckpt.t7')
         time.sleep(1)
     if r == 0 or r == 1:
         global_event.wait()
@@ -669,7 +731,7 @@ if __name__ == "__main__":
     if args.resume:
         print('==> Resuming from checkpoint..')
         assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-        checkpoint = torch.load('./checkpoint/' + args.model + '-ringours3-rank-' + str(args.rank) + '_ckpt.t7')
+        checkpoint = torch.load('./checkpoint/' + args.model + '-fbp3-rank-' + str(args.rank) + '_ckpt.t7')
         layer.load_state_dict(checkpoint['net'])
         best_acc = checkpoint['acc']
         start_epoch = checkpoint['epoch']

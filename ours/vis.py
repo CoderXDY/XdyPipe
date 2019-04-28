@@ -17,13 +17,46 @@ from visdom import Visdom
 import numpy as np
 parser = argparse.ArgumentParser()
 parser.add_argument('-file', help='the filename of log')
-parser.add_argument('--train', '-r', action='store_true', help='resume from checkpoint')
 parser.add_argument('-count', type=int)
+parser.add_argument('-key')
+parser.add_argument('-prop', type=int)
 args = parser.parse_args()
-
 
 path_list = args.file.split()
 path_result = {}
+for path in path_list:
+    plots = []
+    count = 0
+    index = 0
+    with open(path, 'r') as f:
+        for line in f:
+            if count == args.count:
+                break
+            strs = line.strip().split(':')
+            if strs[0] == args.key:
+                if index % args.prop == 0:
+                    plots.append(float(strs[1]))
+                    if count < 20:
+                        print(path + " " + str(float(strs[1])))
+                    count += 1
+                    index += 1
+                else:
+                    index += 1
+            else:
+                pass
+        path_result[path] = plots
+
+vis = Visdom()
+
+x = list(range(args.count))
+print(len(x))
+stack = []
+for name, result in path_result.items():
+    stack.append(np.array(result))
+    print(len(result))
+vis.line(X=x, Y=np.column_stack(stack), win='loss', opts=dict(showlegend=True))
+
+"""
 for path in path_list:
     loss_list = []
     count = 0
@@ -53,3 +86,4 @@ for name, result in path_result.items():
 
 
 vis.line(X=x, Y=np.column_stack(stack), win='loss', opts=dict(showlegend=True))
+"""

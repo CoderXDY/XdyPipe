@@ -63,3 +63,4 @@ each_epoch:32s
 | normal | cifar10 | ResNet101 | tianhe*3 | 0.01 | 64 | 2 | ? | ? | ? |  
 | normal | cifar10 | GoogleNet | tianhe*3 | 0.01 | 64 | 2 | ? | ? | ? |  
 | normal | cifar10 | DPN92 | tianhe*3 | 0.01 | 64 | 2 | ? | ? | ? | ? |
+| fbp3 | cifar10 | VggNet19 | tianhe*3 | 0.01 | 64 | 5 | 152 | 90.6 | ~40s(no cal compress time only compress) |  
