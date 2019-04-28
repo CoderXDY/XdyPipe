@@ -31,160 +31,6 @@ import random
 
 
 
-
-
-# def tensor_len(shape):
-#     length = 1
-#     for i in range(len(shape)):
-#         length *= shape[i]
-#     return length
-#
-#
-#
-# """
-# def piecewise_quantize(input, num_bits=8, fra_bits=6, residual=None, prop=1000, drop=0.8):
-#     qmin = 2. ** fra_bits
-#     qmax = 2. ** num_bits - 1.
-#     scale = qmax - qmin
-#     ab = input.abs()
-#     threshold = torch.max(ab) * drop
-#     id_part1 = ab.lt(threshold)
-#     id_part2 = ab.ge(threshold)
-#     input[id_part1] = torch.round(input[id_part1].mul(qmin).mul(prop))
-#     input[id_part2] = torch.round(input[id_part2].mul(scale).mul(prop))
-#     input = input.cpu()
-#     print(input[input.eq(0.)].size())
-#     return input, None
-#
-#
-#
-#
-#
-# def de_piecewise_quantize(input, num_bits=8, fra_bits= 6, prop=1000):
-#
-#     qmin = 2. ** fra_bits
-#     qmax = 2. ** num_bits - 1.
-#     scale = qmax - qmin
-#     ab = input.abs()
-#     input[ab.le(qmin)] = input[ab.le(qmin)].div(qmin * prop)
-#     input[ab.gt(qmin)] = input[ab.gt(qmin)].div(scale * prop)
-#     return input
-#
-# """
-#
-# def piecewise_quantize(input, logger, num_bits=8, fra_bits=6, drop=0.1, residual=None):
-#     qmin = 2. ** fra_bits
-#     qmax = 2. ** num_bits - 1.
-#     scale = qmax - qmin
-#     sign = input.sign()
-#     ab = input.abs()
-#     v_max = torch.max(ab)
-#     threshold = v_max * drop
-#     id_part1 = ab.lt(threshold)
-#     id_part2 = ab.ge(threshold)
-#     ab[id_part1] = ab[id_part1].mul(qmin).div(threshold)
-#     fra = scale / (v_max - threshold)
-#     ab[id_part2] = qmax - ((v_max - ab[id_part2]).mul(fra))
-#     ab.round_()
-#     ab.mul_(sign)
-#     ab = ab.cpu()
-#     logger.error("zero:" + str(ab[ab.eq(0.)].size()))
-#     return torch.cat([ab.view(-1), torch.Tensor([v_max]).cpu(), torch.Tensor([threshold]).cpu()]), None
-#
-#
-# def de_piecewise_quantize(input, shapes, num_bits=8, fra_bits=6):
-#     input, v_max, threshold = input[:-2], input[-2], input[-1]
-#     input = input.view(shapes)
-#     qmin = 2. ** fra_bits
-#     qmax = 2. ** num_bits - 1.
-#     scale = qmax - qmin
-#     sign = input.sign()
-#     ab = input.abs()
-#     id_part1 = ab.lt(qmin)
-#     id_part2 = ab.ge(qmin)
-#     ab[id_part1] = ab[id_part1].mul(threshold).div(qmin)
-#     fra = (v_max - threshold) / scale
-#     ab[id_part2] = v_max - ((qmax - ab[id_part2]).mul(fra))
-#     return ab.mul(sign)
-#
-#
-#
-#
-#
-# def compress(input, num_bits=8, prop=1000, residual=None):
-#
-#     input = input.view(-1)
-#     if residual is None:
-#         residual = torch.zeros(input.size(), device=torch.device('cuda:0'))
-#     input.add_(residual)
-#     threshold = input.topk(int(input.nelement() * 0.01) if int(input.nelement() * 0.01) != 0 else 1)[0][-1]
-#     residual = torch.where(abs(input) < threshold, input,
-#                            torch.zeros(input.size(), device=torch.device('cuda:0')))
-#     input[abs(input) < threshold] = 0.
-#
-#     qmin = 0.
-#     qmax = 2. ** (num_bits - 1) - 1.
-#     scale = qmax - qmin
-#     input = torch.round(input.mul(scale).mul(prop))
-#
-#     #indexs = input.nonzero().t()
-#     #values = input[indexs[0]]
-#     #sparse_tensor = torch.cat([indexs[0].float(), values])
-#     #return sparse_tensor.half()
-#     return input.char(), residual
-#
-# def unpack(input, shape):
-#     input = input.float()
-#     half_size = int(len(input) / 2)
-#     indexs = input[: half_size].view(1, half_size).long()
-#     values = input[half_size:]
-#     for i in range(len(shape)):
-#         length *= shape[i]
-#     sparse_tensor = torch.sparse.FloatTensor(indexs, values, torch.Size([length]))
-#     return sparse_tensor.to_dense().view(shape)
-#
-#
-#
-#
-#
-# # def quantize(input, num_bits=8, char=False, prop=1000):
-# #     qmin = 0.
-# #     qmax = 2. ** (num_bits - 1) - 1.
-# #     scale = qmax - qmin
-# #     input = torch.round(input.mul(scale).mul(prop))
-# #     if char:
-# #         input = input.char()
-# #     return input
-#
-#     #b = torch.abs(a)
-#     #c = torch.max(b)
-#     #torch.round(torch.abs(a).mul(255).div(c))
-#
-# def dequantize(input, num_bits=8, prop=1000):
-#     if input.type() != 'torch.FloatTensor':
-#         input = input.float()
-#     qmin = 0.
-#     qmax = 2. ** (num_bits - 1) - 1.
-#     scale = qmax - qmin
-#     input.div_(prop * scale)
-#     return input
-#
-#
-#
-# def q_act(input, num_bits=8, char=False):
-#     qmax = 2. ** num_bits - 1.
-#     input = torch.round(input.mul(qmax)).div(qmax)
-#     if char:
-#         input = input.char()
-#     return input
-#
-# def dq_act(input, min=-0.0020, max=0.0020):
-#     # input = input.float()
-#     # noise = input.new(input.size()).uniform_(min, max)
-#     # input.add_(noise)
-#     return input
-
-
 def get_left_right(tag):
     tag2rank = {
         -1: 0,
@@ -230,35 +76,7 @@ def transfer(tag, send_buf, shape):
         send_opt.wait()
         return recv_buf
 
-# def transfer2(tag, send_buf, shape):
-#
-#     if shape == None:
-#         left, right = get_left_right(tag)
-#         send_opt = dist.isend(tensor=send_buf, dst=right)
-#         send_opt.wait()
-#         return None
-#     elif not torch.is_tensor(send_buf):
-#         left, right = get_left_right(tag)
-#         try:
-#             recv_buf = torch.zeros(shape)
-#             dist.recv(tensor=recv_buf, src=left)
-#         except RuntimeError as error:
-#             print("runtime error..")
-#             return None
-#         return recv_buf
-#
-#     else:
-#         left, right = get_left_right(tag)
-#         send_opt = dist.isend(tensor=send_buf, dst=right)
-#
-#         try:
-#             recv_buf = torch.zeros(shape)
-#             dist.recv(tensor=recv_buf, src=left)
-#         except RuntimeError as error:
-#             print("runtime error")
-#             return None
-#         send_opt.wait()
-#         return recv_buf
+
 
 
 
@@ -428,67 +246,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
 
 
 
-# def eval(layer, logger, e, save_event, data_size, testloader):
-#     criterion = nn.CrossEntropyLoss()
-#     criterion.cuda()
-#     layer.eval()
-#     with torch.no_grad():
-#         if dist.get_rank() == 0:
-#             for batch_idx, (inputs, targets) in enumerate(testloader):
-#                 print('batch_idx: ' + str(batch_idx))
-#                 inputs = inputs.cuda(0)
-#                 outputs = layer(inputs)
-#                 outputs = q_act(outputs, char=True)
-#                 dist.send(tensor=outputs.cpu(), dst=1)
-#                 print("send.....")
-#
-#             e.wait()
-#         elif dist.get_rank() == 1:
-#             batch_idx = 0
-#             while data_size > batch_idx:
-#                 print("batch_idx:" + str(batch_idx))
-#                 rec_val = torch.zeros([100, 256, 4, 4], dtype=torch.int8)  # difference model has difference shape
-#                 dist.recv(tensor=rec_val, src=0)
-#                 print("after recv....")
-#                 rec_val = dq_act(rec_val)
-#                 outputs = layer(rec_val.cuda())
-#                 outputs = q_act(outputs, char=True)
-#                 dist.send(tensor=outputs.cpu(), dst=2)
-#                 batch_idx += 1
-#                 print("send...")
-#
-#             e.wait()
-#         elif dist.get_rank() == 2:
-#             test_loss = 0
-#             correct = 0
-#             total = 0
-#             save_event.clear()
-#             global best_acc
-#
-#             for batch_idx, (inputs, targets) in enumerate(testloader):
-#                 rec_val = torch.zeros([100, 512, 2, 2], dtype=torch.int8)
-#                 dist.recv(tensor=rec_val, src=1)
-#                 rec_val = dq_act(rec_val)
-#                 outputs = layer(rec_val.cuda(0))
-#                 targets = targets.cuda()
-#                 loss = criterion(outputs, targets)
-#                 test_loss += loss.item()
-#                 _, predicted = outputs.max(1)
-#                 total += targets.size(0)
-#                 correct += predicted.eq(targets).sum().item()
-#
-#                 progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-#                              % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-#                 logger.error("eval:" + str(test_loss / (batch_idx + 1)))
-#                 acc_str = "eacc: %.3f" % (100. * correct / total,)
-#                 logger.error(acc_str)
-#             time.sleep(1)
-#             acc = 100. * correct / total
-#             if acc > best_acc:
-#                 best_acc = acc
-#                 save_event.set()
-#             time.sleep(1)
-#             e.set()
+
 
 
 
@@ -513,7 +271,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             batch_idx = 0
             while data_size > batch_idx:
                 print("batch_idx:" + str(batch_idx))
-                rec_val = torch.zeros([100, 256, 4, 4])  # difference model has difference shape
+                rec_val = torch.zeros([100, 512, 16, 16])  # difference model has difference shape
                 dist.recv(tensor=rec_val, src=0)
                 print("after recv....")
                 outputs = layer(rec_val.cuda())
@@ -530,7 +288,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             global best_acc
 
             for batch_idx, (inputs, targets) in enumerate(testloader):
-                rec_val = torch.zeros([100, 512, 2, 2])
+                rec_val = torch.zeros([100, 1024, 8, 8])
                 dist.recv(tensor=rec_val, src=1)
                 outputs = layer(rec_val.cuda(0))
                 targets = targets.cuda()
@@ -665,24 +423,26 @@ if __name__ == "__main__":
     node_cfg_2 = [512, 512, 512, 512, 'M']
 
     #vgg19
-    shapes = [[args.batch_size, 256, 4, 4], [args.batch_size, 512, 2, 2]]
+    #shapes = [[args.batch_size, 256, 4, 4], [args.batch_size, 512, 2, 2]]
+    #res101
+    shapes = [[args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8]]
 
     if args.rank == 0:
-        # layer = THResNet101Group0()
+        layer = THResNet101Group0()
         # layer = GoogleNetGroup0()
-        layer = VggLayer(node_cfg_0)
+        #layer = VggLayer(node_cfg_0)
         #layer = THDPNGroup0()
         layer.cuda()
     elif args.rank == 1:
-        # layer = THResNet101Group1()
+        layer = THResNet101Group1()
         # layer = GoogleNetGroup1()
-        layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
+        #layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
         #layer = THDPNGroup1()
         layer.cuda()
     elif args.rank == 2:
-        # layer = THResNet101Group2()
+        layer = THResNet101Group2()
         # layer = GoogleNetGroup2()
-        layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2], last_flag=True)
+        #layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2], last_flag=True)
         #layer = THDPNGroup2()
         layer.cuda()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
