@@ -155,12 +155,14 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         print("backward end..")
 
     if dist.get_rank() == 0:
-        outputs_queue = ThreadQueue(args.buffer_size)
-        semaphore = Semaphore(args.buffer_size)
-        back_process = Process(target=backward_rank0, args=(semaphore,))
-        back_process.start()
+        batch_idx = 0
+        count = 0
+        while batch_idx < 781:
+            if count < 3:
+                count += 1
+            else:
+
         for batch_idx, (inputs, targets) in enumerate(trainloader):
-            #semaphore.acquire()
             print("batch: " + str(batch_idx))
             inputs = inputs.cuda(0)
             outputs = layer(inputs)

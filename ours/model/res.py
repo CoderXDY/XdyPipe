@@ -188,6 +188,57 @@ class THResNet50Group1(nn.Module):
         return out
 
 
+"""
+3-nodes for ResNet 51
+torch.Size([1, 1024, 8, 8])
+torch.Size([1, 2048, 4, 4])
+
+"""
+class THResNet50Group30(nn.Module):
+    def __init__(self):
+        super(THResNet50Group30, self).__init__()
+        self.layer0 = ResInputLayer()
+        self.layer1 = ResBlockLayer(Bottleneck, 64, 3, 1, 64)
+        self.layer2 = ResBlockLayer(Bottleneck, 128, 4, 2, 256)
+
+    def forward(self, x):
+        out = self.layer0(x)
+        out = self.layer1(out)
+        out = self.layer2(out)
+        return out
+
+
+class THResNet50Group31(nn.Module):
+    def __init__(self):
+        super(THResNet50Group31, self).__init__()
+        self.layer0 = ResBlockLayer(Bottleneck, 256, 6, 2, 512)
+
+    def forward(self, x):
+        out = self.layer0(x)
+        return out
+
+
+
+
+class THResNet50Group32(nn.Module):
+    def __init__(self):
+        super(THResNet50Group32, self).__init__()
+        self.layer1 = ResBlockLayer(Bottleneck, 512, 3, 2, 1024)
+        self.layer2 = ResOutputLayer(Bottleneck)
+
+    def forward(self, out):
+        out = self.layer1(out)
+        out = self.layer2(out)
+        return out
+
+
+
+
+
+
+
+
+
 
 """
 3-nodes for ResNet 101
@@ -207,20 +258,21 @@ torch.Size([1, 10])
 class THResNet101Group0(nn.Module):
     def __init__(self):
         super(THResNet101Group0, self).__init__()
-        self.layer0 = ResInputLayer()
-        self.layer1 = ResBlockLayer(Bottleneck, 64, 3, 1, 64)
-        self.layer2 = ResBlockLayer(Bottleneck, 128, 4, 2, 256)
+        self.layer0 = ResInputLayer().cuda(0)
+        self.layer1 = ResBlockLayer(Bottleneck, 64, 3, 1, 64).cuda(0)
+        self.layer2 = ResBlockLayer(Bottleneck, 128, 4, 2, 256).cuda(1)
 
     def forward(self, x):
         out = self.layer0(x)
         out = self.layer1(out)
+        out = out.cuda(1)
         out = self.layer2(out)
         return out
 
 class THResNet101Group1(nn.Module):
     def __init__(self):
         super(THResNet101Group1, self).__init__()
-        self.layer = ResBlockLayer(Bottleneck, 256, 13, 2, 512)
+        self.layer = ResBlockLayer(Bottleneck, 256, 13, 2, 512).cuda(0)
 
     def forward(self, x):
         out = self.layer(x)
@@ -229,12 +281,12 @@ class THResNet101Group1(nn.Module):
 class THResNet101Group2(nn.Module):
     def __init__(self):
         super(THResNet101Group2, self).__init__()
-        self.layer0 = ResBlockLayer(Bottleneck, 256, 10, 1, 1024)
-        self.layer1 = ResBlockLayer(Bottleneck, 512, 3, 2, 1024)
-        self.layer2 = ResOutputLayer(Bottleneck)
+        self.layer0 = ResBlockLayer(Bottleneck, 256, 10, 1, 1024).cuda(0)
+        self.layer1 = ResBlockLayer(Bottleneck, 512, 3, 2, 1024).cuda(0)
+        self.layer2 = ResOutputLayer(Bottleneck).cuda(0)
 
     def forward(self, x):
-        out = self.layer0(x)
+        out = self.layer0(x).cuda(0)
         out = self.layer1(out)
         out = self.layer2(out)
         return out
