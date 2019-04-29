@@ -296,7 +296,12 @@ class THResNet101Group2(nn.Module):
 
 
 """
+res101 for3 node
+group 0:torch.Size([1, 512, 16, 16])
+group 1: torch.Size([1, 1024, 8, 8])
+torch.Size([1, 10])
 
+res50 for 3node
 group 0:torch.Size([1, 512, 16, 16])
 group 1: torch.Size([1, 1024, 8, 8])
 torch.Size([1, 10])
@@ -304,9 +309,12 @@ torch.Size([1, 10])
 
 """
 if __name__ == '__main__':
-    group0 = THResNet101Group0()
-    group1 = THResNet101Group1()
-    group2 = THResNet101Group2()
+    # group0 = THResNet101Group0()
+    # group1 = THResNet101Group1()
+    # group2 = THResNet101Group2()
+    group0 = THResNet50Group30()
+    group1 = THResNet50Group31()
+    group2 = THResNet50Group32()
     x = torch.randn(1, 3, 32, 32)
     x = group0(x)
     print("group 0:" + str(x.size()))
