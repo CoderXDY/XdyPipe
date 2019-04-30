@@ -62,7 +62,8 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                     inputs = inputs.cuda()
                     outputs = layer(inputs)
                     outputs_queue.put(outputs)
-                    dist.send(tensor=outputs.cpu(), dst=1)
+                    send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
+                    send_opt.wait()
                 except StopIteration as stop_e:
                     send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
                     send_opt.wait()
@@ -115,7 +116,8 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                     rec_val.requires_grad_()
                     outputs = layer(rec_val)
                     outputs_queue.put([rec_val, outputs])
-                    dist.send(tensor=outputs.cpu(), dst=2)
+                    send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
+                    send_opt.wait()
                 except RuntimeError as error:
                     while not outputs_queue.empty():
                         grad_recv = torch.zeros(shapes[1])
@@ -127,9 +129,9 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                             print("empty........")
                             break
                         inputs.requires_grad_()
-                        outputs.backward(grad_recv)
+
                         optimizer.zero_grad()
-                        loss.backward(grad_recv)
+                        outputs.backward(grad_recv)
                         optimizer.step()
                     e.wait()
                     break
@@ -149,7 +151,8 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 optimizer.zero_grad()
                 outputs.backward(grad_recv)
                 optimizer.step()
-                dist.send(tensor=inputs.grad.cpu(), dst=0)
+                send_opt = dist.isend(tensor=inputs.grad.cpu(), dst=0)
+                sned_opt.wait()
                 if (batch_idx + 1) % 3 == 0:
                     back_flag = False
             batch_idx += 1
