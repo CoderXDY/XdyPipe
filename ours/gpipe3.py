@@ -41,54 +41,150 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
     layer.train()
     batch_idx = 0
     data_iter = iter(trainloader)
-    back_flag = False
+    forward_flag = False
     outputs_queue = Q.Queue(args.buffer_size)
     forward_first_flag = True
     backward_first_flag = True
+    count = 0
+    back_idx = 0
+    while batch_idx < data_size:
+        if count % 3 == 0:
+            forward_flag = False if forward_flag else True
+        if forward_flag:
+            if forward_first_flag:
+                if dist.get_rank() == 1:
+                    rec_val = torch.zeros(shapes[0])
+                    dist.recv(tensor=rec_val, src=0)
+                    forward_first_flag = False
+                    print("forward init recv")
+                elif dist.get_rank() == 2:
+                    rec_val = torch.zeros(shapes[1])
+                    dist.recv(tensor=rec_val, src=1)
+                    forward_first_flag = False
+                    print("forward init recv")
+            if dist.get_rank() == 0:
+                print("batch_idx: " + str(batch_idx))
+                inputs, targets = next(data_iter)
+                inputs = inputs.cuda()
+                outputs = layer(inputs)
+                outputs_queue.put(outputs)
+                dist.send(tensor=outputs.cpu(), dst=1)
+                batch_idx += 1
+                print("after send....")
+            elif dist.get_rank() == 1:
+                print("batch_idx: " + str(batch_idx))
+                rec_val = rec_val.cuda()
+                rec_val.requires_grad_()
+                outputs = layer(rec_val)
+                outputs_queue.put([rec_val, outputs])
+                send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
+                rec_val = torch.zeros(shapes[0])
+                dist.recv(tensor=rec_val, src=0)
+                send_opt.wait()
+                batch_idx += 1
+                print("after send.....")
+            elif dist.get_rank() == 2:
+                print("batch_idx: " + str(batch_idx))
+                _, targets = next(data_iter)
+                rec_val = rec_val.cuda(0)
+                rec_val.requires_grad_()
+                outputs = layer(rec_val)
+                targets = targets.cuda(0)
+                loss = criterion(outputs, targets)
+                outputs_queue.put([loss, rec_val])
+                rec_val = torch.zeros(shapes[1])
+                dist.recv(tensor=rec_val, src=1)
+                batch_idx += 1
+                print("after send.....")
+        else:
+            if backward_first_flag:
+                if dist.get_rank() == 1:
+                    grad_recv = torch.zeros(shapes[1])
+                    dist.recv(tensor=grad_recv, src=2)
+                    backward_first_flag = False
+                    print("backward init recv")
+                elif dist.get_rank() == 0:
+                    rec_val = torch.zeros(shapes[0])
+                    dist.recv(tensor=rec_val, src=1)
+                    backward_first_flag = False
+                    print("backward init recv")
+            if dist.get_rank() == 0:
+                print("back_id: " + str(back_idx))
+                grad_recv = grad_recv.cuda(0)
+                loss = outputs_queue.get(block=True, timeout=4)
+                loss = loss.cuda(0)
+                optimizer.zero_grad()
+                loss.backward(grad_recv)
+                optimizer.step()
+                grad_recv = torch.zeros(shapes[0])
+                dist.recv(tensor=grad_recv, src=1)
+                back_idx += 1
+                print("back after send....")
+            elif dist.get_rank() == 1:
+                print("back_id: " + str(back_idx))
+                grad_recv = grad_recv.cuda()
+                inputs, outputs = outputs_queue.get(block=True, timeout=4)
+                inputs.requires_grad_()
+                optimizer.zero_grad()
+                outputs.backward(grad_recv)
+                optimizer.step()
+                send_opt = dist.isend(tensor=inputs.grad.cpu(), dst=0)
+                grad_recv = torch.zeros(shapes[1])
+                dist.recv(tensor=grad_recv, src=2)
+                send_opt.wait()
+                back_idx += 1
+                print("back after send....")
+            elif dist.get_rank() == 2:
+                print("back_id: " + str(back_idx))
+                loss, rec_val = outputs_queue.get()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-    def forward():
-        if dist.get_rank() == 1:
-            rec_val = torch.zeros(shapes[0])
-            dist.recv(tensor=rec_val, src=0)
-        elif dist.get_rank() == 2:
-            rec_val = torch.zeros(shapes[1])
-            dist.recv(tensor=rec_val, src=1)
+                train_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total += targets.size(0)
+                correct += predicted.eq(targets).sum().item()
+                progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                             % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                logger.error("train:" + str(train_loss / (batch_idx + 1)))
+                acc_str = "tacc: %.3f" % (100. * correct / total,)
+                logger.error(acc_str)
 
-        if dist.get_rank() == 0:
-            inputs, targets = next(data_iter)
-            inputs = inputs.cuda()
-            outputs = layer(inputs)
-            outputs_queue.put(outputs)
-            dist.send(tensor=outputs.cpu(), dst=1)
-        elif dist.get_rank() == 1:
-            rec_val = rec_val.cuda()
-            rec_val.requires_grad_()
-            outputs = layer(rec_val)
-            outputs_queue.put([rec_val, outputs])
-            send_opt = dist.send(tensor=outputs.cpu(), dst=2)
-            rec_val = torch.zeros(shapes[0])
-            dist.recv(tensor=rec_val, src=0)
+                send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=1)
+                send_opt.wait()
+                back_idx += 1
+                print("back after send.....")
+
+        count += 1
+
+    if dist.get_rank() == 0:
+        while not outputs_queue.empty():
+            grad_recv = grad_recv.cuda(0)
+            loss = outputs_queue.get(block=True, timeout=4)
+            loss = loss.cuda(0)
+            optimizer.zero_grad()
+            loss.backward(grad_recv)
+            optimizer.step()
+            grad_recv = torch.zeros(shapes[0])
+            dist.recv(tensor=grad_recv, src=1)
+        time.sleep(2)
+        e.set()
+    elif dist.get_rank() == 1:
+        while not outputs_queue.empty():
+            grad_recv = grad_recv.cuda()
+            inputs, outputs = outputs_queue.get(block=True, timeout=4)
+            inputs.requires_grad_()
+            optimizer.zero_grad()
+            outputs.backward(grad_recv)
+            optimizer.step()
+            send_opt = dist.isend(tensor=inputs.grad.cpu(), dst=0)
+            grad_recv = torch.zeros(shapes[1])
+            dist.recv(tensor=grad_recv, src=2)
             send_opt.wait()
-
-        elif dist.get_rank() == 2:
-            _, targets = next(data_iter)
-            rec_val = rec_val.cuda(0)
-            rec_val.requires_grad_()
-            outputs = layer(rec_val)
-            targets = targets.cuda(0)
-            loss = criterion(outputs, targets)
-            outputs_queue.put([loss, rec_val])
-            rec_val = torch.zeros(shapes[1])
-            dist.recv(tensor=rec_val, src=1)
-
-
-
-    def backward():
-        if dist.get_rank() == 0:
-            pass
-        elif dist.get_rank() == 1:
-            pass
-        elif dist.get_rank() == 2:
+        e.wait()
+    elif dist.get_rank() == 2:
+        while not outputs_queue.empty():
             loss, rec_val = outputs_queue.get()
             optimizer.zero_grad()
             loss.backward()
@@ -99,288 +195,20 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
             progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                     % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                         % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
             logger.error("train:" + str(train_loss / (batch_idx + 1)))
             acc_str = "tacc: %.3f" % (100. * correct / total,)
             logger.error(acc_str)
 
             send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=1)
             send_opt.wait()
+        e.wait()
 
 
 
 
 
-    while batch_idx < data_size:
-        if (batch_idx + 1) % 3 == 0:
-            back_flag = False if back_flag else True
-        if back_flag:
-            forward()
-        else:
-            backward()
-        batch_idx += 1
 
-
-
-
-def train(layer, logger, shapes, args, e, data_size, trainloader, grad_queue, grad_queue2):
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
-
-    train_loss = 0
-    correct = 0
-    total = 0
-    criterion.cuda()
-
-    layer.train()
-    batch_idx = 0
-    data_iter = iter(trainloader)
-    back_flag = False
-    outputs_queue = Q.Queue(args.buffer_size)
-    while True:
-        if dist.get_rank() == 0:
-            if not back_flag:
-                try:
-                    print("batch_idx: " + str(batch_idx))
-                    inputs, targets = next(data_iter)
-                    inputs = inputs.cuda()
-                    outputs = layer(inputs)
-                    outputs_queue.put(outputs)
-                    dist.send(tensor=outputs.cpu(), dst=1)
-                    print("batch end...")
-                except StopIteration as stop_e:
-                    send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
-                    send_opt.wait()
-                    ###
-                    while not outputs_queue.empty():
-                        # try:
-                        # grad_recv = torch.zeros(shapes[0])
-                        # dist.recv(tensor=grad_recv, src=1)
-
-                        # except RuntimeError as error:
-                        # pass
-                        try:
-                            grad_recv = grad_queue.get(block=True, timeout=4)
-                        except Empty as empty:
-                            time.sleep(2)
-                            try:
-                                grad_recv = grad_queue.get(block=True, timeout=6)
-                            except Empty as empty:
-                                print("grad queue empty!")
-                                break
-                        grad_recv = torch.from_numpy(grad_recv)
-                        grad_recv = grad_recv.cuda(0)
-                        try:
-                            loss = outputs_queue.get(block=True, timeout=4)
-                            loss = loss.cuda(0)
-                        except Empty:
-                            print("empty........")
-                            break
-                        optimizer.zero_grad()
-                        loss.backward(grad_recv)
-                        optimizer.step()
-                    ###
-                    time.sleep(1)
-                    e.set()
-                    break
-                if (batch_idx + 1) % 3 == 0:
-                    back_flag = True
-            else:
-                print("backward idx:" + str(batch_idx))
-                # grad_recv = torch.zeros(shapes[0])
-                # dist.recv(tensor=grad_recv, src=1)
-                try:
-                    grad_recv = grad_queue.get(block=True, timeout=4)
-                except Empty as empty:
-                    time.sleep(2)
-                    try:
-                        grad_recv = grad_queue.get(block=True, timeout=6)
-                    except Empty as empty:
-                        print("grad queue empty!")
-                        break
-
-                grad_recv = torch.from_numpy(grad_recv)
-                grad_recv = grad_recv.cuda(0)
-                try:
-                    loss = outputs_queue.get(block=True, timeout=4)
-                    loss = loss.cuda(0)
-                except Empty:
-                    print("empty........")
-                    break
-                optimizer.zero_grad()
-                loss.backward(grad_recv)
-                optimizer.step()
-                if (batch_idx + 1) % 3 == 0:
-                    back_flag = False
-            batch_idx += 1
-
-        elif dist.get_rank() == 1:
-            if not back_flag:
-                try:
-                    print("batch_idx:" + str(batch_idx))
-                    rec_val = torch.zeros(shapes[0])
-                    dist.recv(tensor=rec_val, src=0)
-                    rec_val = rec_val.cuda()
-                    rec_val.requires_grad_()
-                    outputs = layer(rec_val)
-                    outputs_queue.put([rec_val, outputs])
-                    send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
-                    send_opt.wait()
-                    print("after send....")
-                except RuntimeError as error:
-                    print(error)
-                    while not outputs_queue.empty():
-                        # grad_recv = torch.zeros(shapes[1])
-                        # dist.recv(tensor=grad_recv, src=2)
-                        try:
-                            grad_recv = grad_queue2.get(block=True, timeout=4)
-                        except Empty as empty:
-                            time.sleep(2)
-                            try:
-                                grad_recv = grad_queue2.get(block=True, timeout=6)
-                            except Empty as empty:
-                                print("grad queue2 empty")
-                                break
-                        grad_recv = torch.from_numpy(grad_recv)
-                        grad_recv = grad_recv.cuda(0)
-                        try:
-                            inputs, outputs = outputs_queue.get(block=True, timeout=4)
-                        except Empty:
-                            print("empty........")
-                            break
-                        inputs.requires_grad_()
-
-                        optimizer.zero_grad()
-                        outputs.backward(grad_recv)
-                        optimizer.step()
-                        grad_queue.put(inputs.grad.cpu().numpy())
-                    e.wait()
-                    break
-                if (batch_idx + 1) % 3 == 0:
-                    back_flag = True
-            else:
-                print("backward batch_idx:" + str(batch_idx))
-                # grad_recv = torch.zeros(shapes[1])
-                # dist.recv(tensor=grad_recv, src=2)
-                try:
-                    grad_recv = grad_queue2.get(block=True, timeout=4)
-                except Empty as empty:
-                    time.sleep(2)
-                    try:
-                        grad_recv = grad_queue2.get(block=True, timeout=6)
-                    except Empty as empty:
-                        print("grad queue2 empty")
-                        break
-                grad_recv = torch.from_numpy(grad_recv)
-                grad_recv = grad_recv.cuda(0)
-                print("after recv........")
-                try:
-                    inputs, outputs = outputs_queue.get(block=True, timeout=4)
-                except Empty:
-                    print("empty........")
-                    break
-                inputs.requires_grad_()
-                optimizer.zero_grad()
-                outputs.backward(grad_recv)
-                optimizer.step()
-                # dist.send(tensor=inputs.grad.cpu(), dst=0)
-                try:
-                    grad_queue.put(inputs.grad.cpu().numpy(), timeout=4)
-                except Full as full:
-                    time.slee(2)
-                    try:
-                        grad_queue.put(inputs.grad.cpu().numpy(), timeout=6)
-                    except Full as full:
-                        print('full')
-                        break
-                if (batch_idx + 1) % 3 == 0:
-                    back_flag = False
-            batch_idx += 1
-        elif dist.get_rank() == 2:
-            rec_val = torch.zeros(shapes[1])
-            dist.recv(tensor=rec_val, src=1)
-            index = 0
-            for batch_idx, (_, targets) in enumerate(trainloader):
-                rec_val = rec_val.cuda(0)
-                rec_val.requires_grad_()
-                outputs = layer(rec_val)
-                # start to backward....
-                targets = targets.cuda(0)
-                if (batch_idx + 1) % 3 == 0:
-                    print("backward......." + str(index))
-                    loss = criterion(outputs, targets)
-                    outputs_queue.put([loss, rec_val])
-                    count = 0
-                    print("backeard after put.....")
-                    index += 1
-                    while count < 3:
-
-                        loss, rec_val = outputs_queue.get()
-                        optimizer.zero_grad()
-                        loss.backward()
-                        optimizer.step()
-                        '''
-                        train_loss += loss.item()
-                        _, predicted = outputs.max(1)
-                        total += targets.size(0)
-                        correct += predicted.eq(targets).sum().item()
-                        progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                                 % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-                        logger.error("train:" + str(train_loss / (batch_idx + 1)))
-                        acc_str = "tacc: %.3f" % (100. * correct / total,)
-                        logger.error(acc_str)
-                        '''
-                        # send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=1)
-                        # send_opt.wait()
-                        try:
-                            grad_queue2.put(rec_val.grad.cpu().numpy(), timeout=4)
-                        except Full as full:
-                            time.sleep(2)
-                            try:
-                                grad_queue2.put(rec_val.grad.cpu().numpy(), timeout=4)
-                            except Full as full:
-                                print("full...")
-                                break
-                        print("index: " + str(index))
-                        count += 1
-                        index += 1
-                else:
-                    print("index:" + str(index))
-                    loss = criterion(outputs, targets)
-                    outputs_queue.put([loss, rec_val])
-                    try:
-                        rec_val = torch.zeros(shapes[1])
-                        dist.recv(tensor=rec_val, src=1)
-                        print("after index " + str(index))
-                    except RuntimeError as error:
-                        while not outputs_queue.empty():
-                            loss, rec_val = outputs_queue.get()
-                            optimizer.zero_grad()
-                            loss.backward()
-                            optimizer.step()
-                            train_loss += loss.item()
-                            _, predicted = outputs.max(1)
-                            total += targets.size(0)
-                            correct += predicted.eq(targets).sum().item()
-                            progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                                         % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-                            logger.error("train:" + str(train_loss / (batch_idx + 1)))
-                            acc_str = "tacc: %.3f" % (100. * correct / total,)
-                            logger.error(acc_str)
-                            try:
-                                grad_queue2.put(rec_val.grad.cpu().numpy(), timeout=4)
-                            except Full as full:
-                                time.sleep(2)
-                                try:
-                                    grad_queue2.put(rec_val.grad.cpu().numpy(), timeout=4)
-                                except Full as full:
-                                    print("full...")
-                                    break
-                            # send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=1)
-                            # send_opt.wait()
-                        e.wait()
-                        break
-                    index += 1
 
 
 def eval(layer, logger, e, save_event, data_size, testloader):
@@ -443,7 +271,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
 
 
 def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size,
-        trainloader, testloader, grad_queue, grad_queue2):
+        trainloader, testloader):
     logger = logging.getLogger(args.model + '-gpipe3-rank-' + str(dist.get_rank()))
     file_handler = logging.FileHandler(args.model + '-gpipe3-rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
@@ -456,7 +284,7 @@ def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_eve
     for epoch in range(start_epoch, start_epoch + epoch_num):
         print('Training epoch: %d' % epoch)
         set_seed(epoch + 1)
-        train(layer, logger, shapes, args, epoch_event, train_size, trainloader, grad_queue, grad_queue2)
+        train(layer, logger, shapes, args, epoch_event, train_size, trainloader)
         epoch_event.clear()
         time.sleep(1)
         print('Eval epoch: %d' % epoch)
@@ -616,4 +444,4 @@ if __name__ == "__main__":
     if args.epoch != 0:
         start_epoch = args.epoch
     run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size,
-        trainloader, testloader, grad_queue, grad_queue2)
+        trainloader, testloader)
