@@ -68,8 +68,9 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 inputs = inputs.cuda()
                 outputs = layer(inputs)
                 outputs_queue.put(outputs)
-                dist.send(tensor=outputs.cpu(), dst=1)
+                send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
                 batch_idx += 1
+                send_opt.wait()
                 print("after send....")
             elif dist.get_rank() == 1:
                 print("batch_idx: " + str(batch_idx))
@@ -80,6 +81,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
                 rec_val = torch.zeros(shapes[0])
                 dist.recv(tensor=rec_val, src=0)
+                print("after recv..")
                 send_opt.wait()
                 batch_idx += 1
                 print("after send.....")
@@ -94,16 +96,19 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 outputs_queue.put([loss, rec_val])
                 rec_val = torch.zeros(shapes[1])
                 dist.recv(tensor=rec_val, src=1)
+                print("after recv...")
                 batch_idx += 1
                 print("after send.....")
         else:
             if backward_first_flag:
                 if dist.get_rank() == 1:
+                    print("before init backward")
                     grad_recv = torch.zeros(shapes[1])
                     dist.recv(tensor=grad_recv, src=2)
                     backward_first_flag = False
                     print("backward init recv")
                 elif dist.get_rank() == 0:
+                    print("before init backward")
                     rec_val = torch.zeros(shapes[0])
                     dist.recv(tensor=rec_val, src=1)
                     backward_first_flag = False
