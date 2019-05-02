@@ -64,6 +64,31 @@ class Bottleneck(nn.Module):
         return out
 
 
+
+"""
+res34
+in_plance: 64
+in_plance: 64
+in_plance: 128
+in_plance: 256
+in_plance: 512
+torch.Size([1, 64, 32, 32])
+torch.Size([1, 128, 16, 16])
+torch.Size([1, 256, 8, 8])
+torch.Size([1, 512, 4, 4])
+torch.Size([1, 10])
+
+
+
+##############
+
+
+"""
+
+
+
+
+
 class ResNet(nn.Module):
     def __init__(self, block, num_blocks, num_classes=10):
         super(ResNet, self).__init__()
@@ -128,7 +153,7 @@ def ResNet152():
 
 
 def test():
-    net = ResNet101()
+    net = ResNet34()
     y = net(torch.randn(1,3,32,32))
     print(y.size())
 
