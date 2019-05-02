@@ -31,7 +31,7 @@ import random
 
 
 
-def train(layer, logger, shapes, args, e, data_size, trainloader):
+def train(layer, logger, shapes, args, e, data_size, trainloader,s0, s1):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     train_loss = 0
@@ -47,9 +47,12 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
     backward_first_flag = True
     count = 0
     back_idx = 0
-    while batch_idx < data_size:
+    stop_size = data_size - (data_size % 3)
+    while batch_idx < stop_size:
         if count % 3 == 0:
             forward_flag = False if forward_flag else True
+            forward_first_flag = True
+            backward_first_flag = True
         if forward_flag:
             if forward_first_flag:
                 if dist.get_rank() == 1:
@@ -61,7 +64,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                     rec_val = torch.zeros(shapes[1])
                     dist.recv(tensor=rec_val, src=1)
                     forward_first_flag = False
-                    print("forward init recv")
+                    #print("forward init recv")
             if dist.get_rank() == 0:
                 print("batch_idx: " + str(batch_idx))
                 inputs, targets = next(data_iter)
@@ -72,6 +75,9 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 batch_idx += 1
                 send_opt.wait()
                 print("after send....")
+                # if count != 0 and count % 2 == 0:
+                #     print("wait...")
+                #     s0.wait()
             elif dist.get_rank() == 1:
                 print("batch_idx: " + str(batch_idx))
                 rec_val = rec_val.cuda()
@@ -79,14 +85,20 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 outputs = layer(rec_val)
                 outputs_queue.put([rec_val, outputs])
                 send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
-                rec_val = torch.zeros(shapes[0])
-                dist.recv(tensor=rec_val, src=0)
-                print("after recv..")
+
+                if (count + 1) % 3 != 0:
+                    rec_val = torch.zeros(shapes[0])
+                    dist.recv(tensor=rec_val, src=0)
+                    print("after recv..")
                 send_opt.wait()
                 batch_idx += 1
                 print("after send.....")
+                # if count != 0 and count % 2 == 0:
+                #     print("wait.....")
+                #     s1.wait()
+                #     s0.set()
             elif dist.get_rank() == 2:
-                print("batch_idx: " + str(batch_idx))
+                #print("batch_idx: " + str(batch_idx))
                 _, targets = next(data_iter)
                 rec_val = rec_val.cuda(0)
                 rec_val.requires_grad_()
@@ -94,23 +106,30 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 targets = targets.cuda(0)
                 loss = criterion(outputs, targets)
                 outputs_queue.put([loss, rec_val])
-                rec_val = torch.zeros(shapes[1])
-                dist.recv(tensor=rec_val, src=1)
-                print("after recv...")
+                if (count + 1) % 3 != 0:
+                    rec_val = torch.zeros(shapes[1])
+                    dist.recv(tensor=rec_val, src=1)
+                    #print("after recv...")
                 batch_idx += 1
-                print("after send.....")
+                #print("after send.....")
+                # if count != 0 and count % 2 == 0:
+                #     print("wait......")
+                #     s1.set()
+
         else:
             if backward_first_flag:
                 if dist.get_rank() == 1:
+                    #s1.clear()
                     print("before init backward")
                     grad_recv = torch.zeros(shapes[1])
                     dist.recv(tensor=grad_recv, src=2)
                     backward_first_flag = False
                     print("backward init recv")
                 elif dist.get_rank() == 0:
+                    #s0.clear()
                     print("before init backward")
-                    rec_val = torch.zeros(shapes[0])
-                    dist.recv(tensor=rec_val, src=1)
+                    grad_recv = torch.zeros(shapes[0])
+                    dist.recv(tensor=grad_recv, src=1)
                     backward_first_flag = False
                     print("backward init recv")
             if dist.get_rank() == 0:
@@ -121,8 +140,9 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 optimizer.zero_grad()
                 loss.backward(grad_recv)
                 optimizer.step()
-                grad_recv = torch.zeros(shapes[0])
-                dist.recv(tensor=grad_recv, src=1)
+                if (count + 1) % 3 != 0:
+                    grad_recv = torch.zeros(shapes[0])
+                    dist.recv(tensor=grad_recv, src=1)
                 back_idx += 1
                 print("back after send....")
             elif dist.get_rank() == 1:
@@ -134,13 +154,14 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 outputs.backward(grad_recv)
                 optimizer.step()
                 send_opt = dist.isend(tensor=inputs.grad.cpu(), dst=0)
-                grad_recv = torch.zeros(shapes[1])
-                dist.recv(tensor=grad_recv, src=2)
+                if (count + 1) % 3 != 0:
+                    grad_recv = torch.zeros(shapes[1])
+                    dist.recv(tensor=grad_recv, src=2)
                 send_opt.wait()
                 back_idx += 1
                 print("back after send....")
             elif dist.get_rank() == 2:
-                print("back_id: " + str(back_idx))
+                #print("back_id: " + str(back_idx))
                 loss, rec_val = outputs_queue.get()
                 optimizer.zero_grad()
                 loss.backward()
@@ -159,7 +180,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=1)
                 send_opt.wait()
                 back_idx += 1
-                print("back after send.....")
+                #print("back after send.....")
 
         count += 1
 
@@ -234,7 +255,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             batch_idx = 0
             while data_size > batch_idx:
                 print("batch_idx:" + str(batch_idx))
-                rec_val = torch.zeros([100, 480, 16, 16])  # difference model has difference shape
+                rec_val = torch.zeros([100, 256, 4, 4])  # difference model has difference shape
                 dist.recv(tensor=rec_val, src=0)
                 print("after recv....")
                 outputs = layer(rec_val.cuda())
@@ -251,7 +272,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             global best_acc
 
             for batch_idx, (inputs, targets) in enumerate(testloader):
-                rec_val = torch.zeros([100, 832, 8, 8])
+                rec_val = torch.zeros([100,  512, 2, 2])
                 dist.recv(tensor=rec_val, src=1)
                 outputs = layer(rec_val.cuda(0))
                 targets = targets.cuda()
@@ -276,7 +297,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
 
 
 def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size,
-        trainloader, testloader):
+        trainloader, testloader, s0, s1):
     logger = logging.getLogger(args.model + '-gpipe3-rank-' + str(dist.get_rank()))
     file_handler = logging.FileHandler(args.model + '-gpipe3-rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
@@ -289,7 +310,7 @@ def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_eve
     for epoch in range(start_epoch, start_epoch + epoch_num):
         print('Training epoch: %d' % epoch)
         set_seed(epoch + 1)
-        train(layer, logger, shapes, args, epoch_event, train_size, trainloader)
+        train(layer, logger, shapes, args, epoch_event, train_size, trainloader, s0, s1)
         epoch_event.clear()
         time.sleep(1)
         print('Eval epoch: %d' % epoch)
@@ -372,33 +393,33 @@ if __name__ == "__main__":
     node_cfg_2 = [512, 512, 512, 512, 'M']
 
     # vgg19
-    # shapes = [[args.batch_size, 256, 4, 4], [args.batch_size, 512, 2, 2]]
+    shapes = [[args.batch_size, 256, 4, 4], [args.batch_size, 512, 2, 2]]
     # res101
     # shapes = [[args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8]]
     # googlenet
-    shapes = [[args.batch_size, 480, 16, 16], [args.batch_size, 832, 8, 8]]
+    #shapes = [[args.batch_size, 480, 16, 16], [args.batch_size, 832, 8, 8]]
     # res50
     # shapes = [[args.batch_size, 1024, 8, 8], [args.batch_size, 2048, 4, 4]]
 
     if args.rank == 0:
         # layer = THResNet101Group0()
-        layer = GoogleNetGroup0()
-        # layer = VggLayer(node_cfg_0)
+        #layer = GoogleNetGroup0()
+        layer = VggLayer(node_cfg_0)
         # layer = THDPNGroup0()
         # layer = THResNet50Group30()
         ## big model do not use
         layer.cuda()
     elif args.rank == 1:
         # layer = THResNet101Group1()
-        layer = GoogleNetGroup1()
-        # layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
+        #layer = GoogleNetGroup1()
+        layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
         # layer = THDPNGroup1()
         # layer = THResNet50Group31()
         layer.cuda()
     elif args.rank == 2:
         # layer = THResNet101Group2()
-        layer = GoogleNetGroup2()
-        # layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2], last_flag=True)
+        #layer = GoogleNetGroup2()
+        layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2], last_flag=True)
         # layer = THDPNGroup2()
         # layer = THResNet50Group32()
         layer.cuda()
@@ -449,4 +470,4 @@ if __name__ == "__main__":
     if args.epoch != 0:
         start_epoch = args.epoch
     run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size,
-        trainloader, testloader)
+        trainloader, testloader, start_event, start_event2)
