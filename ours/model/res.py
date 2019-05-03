@@ -199,22 +199,24 @@ class THResNet50Group30(nn.Module):
         super(THResNet50Group30, self).__init__()
         self.layer0 = ResInputLayer()
         self.layer1 = ResBlockLayer(Bottleneck, 64, 3, 1, 64)
-        self.layer2 = ResBlockLayer(Bottleneck, 128, 4, 2, 256)
+
 
     def forward(self, x):
         out = self.layer0(x)
         out = self.layer1(out)
-        out = self.layer2(out)
+
         return out
 
 
 class THResNet50Group31(nn.Module):
     def __init__(self):
         super(THResNet50Group31, self).__init__()
-        self.layer0 = ResBlockLayer(Bottleneck, 256, 6, 2, 512)
+        self.layer0 = ResBlockLayer(Bottleneck, 128, 4, 2, 256)
+        self.layer1 = ResBlockLayer(Bottleneck, 256, 6, 2, 512)
 
     def forward(self, x):
         out = self.layer0(x)
+        out = self.layer1(out)
         return out
 
 
@@ -358,13 +360,13 @@ if __name__ == '__main__':
     # group0 = THResNet101Group0()
     # group1 = THResNet101Group1()
     # group2 = THResNet101Group2()
-    # group0 = THResNet50Group30()
-    # group1 = THResNet50Group31()
-    # group2 = THResNet50Group32()
+    group0 = THResNet50Group30()
+    group1 = THResNet50Group31()
+    group2 = THResNet50Group32()
 
-    group0 = THResNet34Group0()
-    group1 = THResNet34Group1()
-    group2 = THResNet34Group2()
+    # group0 = THResNet34Group0()
+    # group1 = THResNet34Group1()
+    # group2 = THResNet34Group2()
     x = torch.randn(1, 3, 32, 32)
     x = group0(x)
     print("group 0:" + str(x.size()))
