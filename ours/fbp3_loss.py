@@ -274,7 +274,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             batch_idx = 0
             while data_size > batch_idx:
                 print("batch_idx:" + str(batch_idx))
-                rec_val = torch.zeros([100, 256, 32, 32])  # difference model has difference shape
+                rec_val = torch.zeros([100, 64, 32, 32])  # difference model has difference shape
                 dist.recv(tensor=rec_val, src=0)
                 print("after recv....")
                 outputs = layer(rec_val.cuda())
@@ -434,33 +434,33 @@ if __name__ == "__main__":
     #shapes = [[args.batch_size, 480, 16, 16], [args.batch_size, 832, 8, 8]]
     #res50
     #shapes = [[args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8]]#old
-    shapes = [[args.batch_size, 256, 32, 32], [args.batch_size, 1024, 8, 8]]
+    #shapes = [[args.batch_size, 256, 32, 32], [args.batch_size, 1024, 8, 8]]
     # res34
-    #shapes = [[args.batch_size, 64, 32, 32], [args.batch_size, 256, 8, 8]]
+    shapes = [[args.batch_size, 64, 32, 32], [args.batch_size, 256, 8, 8]]
     if args.rank == 0:
         #layer = THResNet101Group0()
         #layer = GoogleNetGroup0()
         #layer = VggLayer(node_cfg_0)
         #layer = THDPNGroup0()
-        layer = THResNet50Group30()
+        #layer = THResNet50Group30()
         ## big model do not use
-        #layer = THResNet34Group0()
+        layer = THResNet34Group0()
         layer.cuda()
     elif args.rank == 1:
         #layer = THResNet101Group1()
         #layer = GoogleNetGroup1()
         #layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
         #layer = THDPNGroup1()
-        layer = THResNet50Group31()
-        #layer = THResNet34Group1()
+        #layer = THResNet50Group31()
+        layer = THResNet34Group1()
         layer.cuda()
     elif args.rank == 2:
         #layer = THResNet101Group2()
         #layer = GoogleNetGroup2()
         #layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2], last_flag=True)
         #layer = THDPNGroup2()
-        layer = THResNet50Group32()
-        #layer = THResNet34Group2()
+        #layer = THResNet50Group32()
+        layer = THResNet34Group2()
         layer.cuda()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     #layer.share_memory()
