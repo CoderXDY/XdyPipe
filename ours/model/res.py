@@ -144,6 +144,64 @@ class THResNetGroup1(nn.Module):
         out = self.layer2(out)
         return out
 
+
+
+
+"""
+3-nodes for resnet 18
+
+group 0:torch.Size([1, 64, 32, 32])
+group 1: torch.Size([1, 256, 8, 8])
+
+
+"""
+class THResNet18Group0(nn.Module):
+    def __init__(self):
+        super(THResNet18Group0, self).__init__()
+        self.layer0 = ResInputLayer()
+        self.layer1 = ResBlockLayer(BasicBlock, 64, 2, 1, 64)
+
+    def forward(self, x):
+        out = self.layer0(x)
+        out = self.layer1(out)
+        return out
+
+
+class THResNet18Group1(nn.Module):
+    def __init__(self):
+        super(THResNet18Group1, self).__init__()
+        self.layer0 = ResBlockLayer(BasicBlock, 128, 2, 2, 64)
+        self.layer1 = ResBlockLayer(BasicBlock, 256, 2, 2, 128)
+
+    def forward(self, x):
+        out = self.layer0(x)
+        out = self.layer1(out)
+        return out
+
+class THResNet18Group2(nn.Module):
+    def __init__(self):
+        super(THResNet18Group2, self).__init__()
+        self.layer0 = ResBlockLayer(BasicBlock, 512, 2, 2, 256)
+        self.layer1 = ResOutputLayer(BasicBlock)
+
+    def forward(self, x):
+        out = self.layer0(x)
+        out = self.layer1(out)
+        return out
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 """
 
 ResNet50 splits two groups to develop in Th-2
@@ -360,13 +418,16 @@ if __name__ == '__main__':
     # group0 = THResNet101Group0()
     # group1 = THResNet101Group1()
     # group2 = THResNet101Group2()
-    group0 = THResNet50Group30()
-    group1 = THResNet50Group31()
-    group2 = THResNet50Group32()
+    # group0 = THResNet50Group30()
+    # group1 = THResNet50Group31()
+    # group2 = THResNet50Group32()
 
     # group0 = THResNet34Group0()
     # group1 = THResNet34Group1()
     # group2 = THResNet34Group2()
+    group0 = THResNet18Group0()
+    group1 = THResNet18Group1()
+    group2 = THResNet18Group2()
     x = torch.randn(1, 3, 32, 32)
     x = group0(x)
     print("group 0:" + str(x.size()))

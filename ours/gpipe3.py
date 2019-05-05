@@ -13,7 +13,7 @@ import torch.optim as optim
 import logging
 import time
 from model.res import THResNet101Group0, THResNet101Group2, THResNet101Group1, THResNet50Group30, THResNet50Group31, \
-    THResNet50Group32, THResNet34Group0, THResNet34Group1, THResNet34Group2
+    THResNet50Group32, THResNet34Group0, THResNet34Group1, THResNet34Group2, THResNet18Group0, THResNet18Group1, THResNet18Group2
 from model.vgg_module import VggLayer
 from model.googlenet import GoogleNetGroup0, GoogleNetGroup1, GoogleNetGroup2
 from model.dpn import THDPNGroup0, THDPNGroup1, THDPNGroup2
@@ -399,33 +399,38 @@ if __name__ == "__main__":
     # googlenet
     #shapes = [[args.batch_size, 480, 16, 16], [args.batch_size, 832, 8, 8]]
     # res50
-    # shapes = [[args.batch_size, 1024, 8, 8], [args.batch_size, 2048, 4, 4]]
+    shapes = [[args.batch_size, 256, 32, 32], [args.batch_size, 1024, 8, 8]]
     #res34
+    #shapes = [[args.batch_size, 64, 32, 32], [args.batch_size, 256, 8, 8]]
+    # res18
     shapes = [[args.batch_size, 64, 32, 32], [args.batch_size, 256, 8, 8]]
     if args.rank == 0:
         # layer = THResNet101Group0()
         #layer = GoogleNetGroup0()
         #layer = VggLayer(node_cfg_0)
         # layer = THDPNGroup0()
-        # layer = THResNet50Group30()
-        layer = THResNet34Group0()
+        #layer = THResNet50Group30()
+        #layer = THResNet34Group0()
         ## big model do not use
+        layer = THResNet18Group0()
         layer.cuda()
     elif args.rank == 1:
         # layer = THResNet101Group1()
         #layer = GoogleNetGroup1()
         #layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
         # layer = THDPNGroup1()
-        # layer = THResNet50Group31()
-        layer = THResNet34Group1()
+        #layer = THResNet50Group31()
+        #layer = THResNet34Group1()
+        layer = THResNet18Group1()
         layer.cuda()
     elif args.rank == 2:
         # layer = THResNet101Group2()
         #layer = GoogleNetGroup2()
         #layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2], last_flag=True)
         # layer = THDPNGroup2()
-        # layer = THResNet50Group32()
-        layer = THResNet34Group2()
+        #layer = THResNet50Group32()
+        #layer = THResNet34Group2()
+        layer = THResNet18Group2()
         layer.cuda()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # layer.share_memory()
