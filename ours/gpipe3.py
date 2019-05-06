@@ -399,7 +399,7 @@ if __name__ == "__main__":
     # googlenet
     #shapes = [[args.batch_size, 480, 16, 16], [args.batch_size, 832, 8, 8]]
     # res50
-    shapes = [[args.batch_size, 256, 32, 32], [args.batch_size, 1024, 8, 8]]
+    #shapes = [[args.batch_size, 256, 32, 32], [args.batch_size, 1024, 8, 8]]
     #res34
     #shapes = [[args.batch_size, 64, 32, 32], [args.batch_size, 256, 8, 8]]
     # res18
