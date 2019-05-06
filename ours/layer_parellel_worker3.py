@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import logging
 import time
-from model.res import THResNet101Group0, THResNet101Group2, THResNet101Group1
+from model.res import THResNet101Group0, THResNet101Group2, THResNet101Group1, THResNet50Group30, THResNet50Group31, THResNet50Group32, THResNet34Group0, THResNet34Group1, THResNet34Group2, THResNet18Group0, THResNet18Group1, THResNet18Group2
 from model.vgg_module import VggLayer
 from model.googlenet import GoogleNetGroup0, GoogleNetGroup1, GoogleNetGroup2
 from model.dpn import  THDPNGroup0, THDPNGroup1, THDPNGroup2
@@ -189,7 +189,7 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
 
 
 def run(start_epoch, layer, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader):
-    logger = logging.getLogger(args.model + '-rank-' + str(dist.get_rank()))
+    logger = logging.getLogger(args.model + '-normal-rank-' + str(dist.get_rank()))
     file_handler = logging.FileHandler(args.model + '-normal-rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
@@ -262,7 +262,7 @@ if __name__ == "__main__":
     node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M']
     node_cfg_1 = [512, 512, 512, 512, 'M']
     node_cfg_2 = [512, 512, 512, 512, 'M']
-
+    shapes = [[args.batch_size, 64, 32, 32], [args.batch_size, 256, 8, 8]]
     #shapes = [[args.batch_size, 480, 16, 16], [args.batch_size, 832, 8, 8]]
     if args.rank == 0:
         #layer = THResNet101Group0()
