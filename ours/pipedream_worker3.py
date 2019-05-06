@@ -2,7 +2,7 @@ import torch
 import torch.distributed as dist
 from torch import nn as nn
 import argparse
-
+import queue as Q
 from torch.multiprocessing import Queue, Event
 from multiprocessing.managers import BaseManager as bm
 from multiprocessing.dummy import Process
@@ -11,7 +11,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 import logging
 import time
-from model.res import THResNet101Group0, THResNet101Group2, THResNet101Group1
+from model.res import THResNet101Group0, THResNet101Group2, THResNet101Group1, THResNet50Group30, THResNet50Group31, \
+    THResNet50Group32, THResNet34Group0, THResNet34Group1, THResNet34Group2, THResNet18Group0, THResNet18Group1, THResNet18Group2
 from model.vgg_module import VggLayer
 from model.googlenet import GoogleNetGroup0, GoogleNetGroup1, GoogleNetGroup2
 from model.dpn import  THDPNGroup0, THDPNGroup1, THDPNGroup2
@@ -25,6 +26,7 @@ import psutil
 import gc
 import torch.backends.cudnn as cudnn
 import numpy as np
+import random
 """
  
  pipedream 
@@ -40,7 +42,7 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
     layer.train()
 
     if dist.get_rank() == 0:
-        output_queue = ThreadQueue(3)
+        output_queue = Q.Queue(3)
         data_iter = iter(trainloader)
         batch_idx = 0
         while True:
@@ -48,7 +50,7 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
                 if output_queue.qsize() == 3:
                     #backward_event.wait()
                     optimizer.zero_grad()
-                    grad = torch.zeros([args.batch_size, 256, 4, 4])
+                    grad = torch.zeros(shapes[0])
                     dist.recv(tensor=grad, src=1)
                     print("qsize after recv")
                     outputs = output_queue.get()
@@ -59,14 +61,10 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
                 else:
                     inputs, targets = next(data_iter)
                     inputs = inputs.cuda()
-                    targets_queue.put(targets.numpy(), block=False)
-                    print("after target...")
                     outputs = layer(inputs)
+                    output_queue.put(outputs)
                     send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
                     send_opt.wait()
-                    print("after wait....")
-                    output_queue.put(outputs)
-                    print("after output")
                     batch_idx += 1
             except StopIteration as stop_e:
                 send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
@@ -90,12 +88,12 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
 
     elif dist.get_rank() == 1:
         batch_idx = 0
-        output_queue = ThreadQueue(3)
+        output_queue = Q.Queue(3)
         while True:
             if output_queue.qsize() == 3:
                #backward_event.wait()
                 optimizer.zero_grad()
-                grad = torch.zeros([args.batch_size, 512, 2, 2])
+                grad = torch.zeros(shapes[1])
                 dist.recv(tensor=grad, src=2)
                 print("qsize after recv")
                 outputs, inputs = output_queue.get()
@@ -110,7 +108,7 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
             else:
                 try:
                     print("start....")
-                    rec_val = torch.zeros([args.batch_size, 256, 4, 4])
+                    rec_val = torch.zeros(shapes[0])
                     dist.recv(tensor=rec_val, src=0)
                     print("after recv")
                 except RuntimeError as error:
@@ -135,10 +133,8 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
                 rec_val = rec_val.cuda()
                 rec_val.requires_grad_()
                 outputs = layer(rec_val)
-                print("after output")
                 output_queue.put([outputs, rec_val])
-                send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
-                #send_opt.wait()
+                dist.send(tensor=outputs.cpu(), dst=2)
                 print("after wait...")
                 batch_idx += 1
 
@@ -152,7 +148,7 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
         while True:
             try:
                 #print("start.....")
-                rec_val = torch.zeros([args.batch_size, 512, 2, 2])
+                rec_val = torch.zeros(shapes[1])
                 dist.recv(tensor=rec_val, src=1)
                 #print("after recv......")
             except RuntimeError as error:
@@ -165,9 +161,8 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
             rec_val.requires_grad_()
             optimizer.zero_grad()
             outputs = layer(rec_val)
-            #print("after output")
-            targets = targets_queue.get(block=True, timeout=2)
-            targets = torch.from_numpy(targets).cuda()
+            _, targets = next(data_iter)
+            targets = targets.cuda()
             #print("after target")
             loss = criterion(outputs, targets)
             loss.backward()
@@ -178,15 +173,14 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
             correct += predicted.eq(targets).sum().item()
             progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-            # if not backward_event.is_set():
-            #     backward_event.set()
-            send_opt = dist.isend(tensor=rec_val.grad.cpu(), dst=1)
-            #send_opt.wait()
-            #print("after send")
-            #if batch_idx % 10 == 0:
             logger.error("train:" + str(train_loss / (batch_idx + 1)))
             acc_str = "tacc: %.3f" % (100. * correct / total,)
             logger.error(acc_str)
+            # if not backward_event.is_set():
+            #     backward_event.set()
+            dist.isend(tensor=rec_val.grad.cpu(), dst=1)
+
+
             batch_idx += 1
 
 
@@ -262,14 +256,21 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
                 batch_idx += 1
 
 
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
 def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, backward_event=None):
-    logger = logging.getLogger(args.model + '-rank-' + str(dist.get_rank()))
+    logger = logging.getLogger(args.model + '-pipedream-rank-' + str(dist.get_rank()))
     file_handler = logging.FileHandler(args.model + '-pipedream-rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
-    epoch_num = 200
+    epoch_num = 200 - start_epoch
     global best_acc
     r = dist.get_rank()
     for epoch in range(start_epoch, start_epoch + epoch_num):
@@ -285,7 +286,7 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
             state = {
                 'net': layer.state_dict(),
                 'acc': best_acc,
-                'epoch': epoch,
+                'epoch': 0,
             }
             torch.save(state, './checkpoint/' + args.model + '-pipedream-rank-' + str(r) + '_ckpt.t7')
         time.sleep(1)
@@ -328,7 +329,7 @@ if __name__ == "__main__":
     bm.register('get_targets_queue')
     bm.register('get_save_event')
     bm.register('get_backward_event')
-    m = bm(address=(args.ip,args.port), authkey=b'xpipe')
+    m = bm(address=(args.ip, args.port), authkey=b'xpipe')
     m.connect()
     global_event = m.get_global_event()
     epoch_event = m.get_epoch_event()
@@ -342,7 +343,8 @@ if __name__ == "__main__":
     node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M']
     node_cfg_1 = [512, 512, 512, 512, 'M']
     node_cfg_2 = [512, 512, 512, 512, 'M']
-
+    # res18
+    shapes = [[args.batch_size, 64, 32, 32], [args.batch_size, 256, 8, 8]]
     if args.rank == 0:
         #layer = THResNet101Group0()
         layer = VggLayer(node_cfg_0)
@@ -398,9 +400,7 @@ if __name__ == "__main__":
                                                  num_workers=args.data_worker, drop_last=True)
         train_size = len(trainloader)
         test_size = len(testloader)
-    if args.rank == 1:
-        trainloader = None
-        testloader = None
+
 
     if args.epoch != 0:
         start_epoch = args.epoch
