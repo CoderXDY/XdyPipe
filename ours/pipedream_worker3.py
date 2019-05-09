@@ -40,10 +40,10 @@ def pipe_dream(layer, logger, args, backward_event, targets_queue, e, data_size,
     criterion = nn.CrossEntropyLoss().cuda()
     optimizer = optim.SGD(layer.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
     layer.train()
-
+    data_iter = iter(trainloader)
     if dist.get_rank() == 0:
         output_queue = Q.Queue(3)
-        data_iter = iter(trainloader)
+
         batch_idx = 0
         while True:
             try:
@@ -190,57 +190,41 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
     criterion = nn.CrossEntropyLoss()
     criterion.cuda()
     layer.eval()
-
     with torch.no_grad():
         if dist.get_rank() == 0:
             for batch_idx, (inputs, targets) in enumerate(testloader):
-                inputs, targets = inputs.cuda(0), targets
+                print('batch_idx: ' + str(batch_idx))
+                inputs = inputs.cuda(0)
                 outputs = layer(inputs)
-                targets_queue.put(targets.numpy())
-                print("after put....")
-                send_opt = dist.isend(tensor=outputs.cpu(), dst=1)
-                send_opt.wait()
-            send_opt = dist.isend(tensor=torch.zeros(0), dst=1)
-            send_opt.wait()
+                dist.send(tensor=outputs.cpu(), dst=1)
+                print("send.....")
+
             e.wait()
         elif dist.get_rank() == 1:
             batch_idx = 0
-            while True:
-                try:
-                    rec_val = torch.zeros([100, 256, 4, 4])  # difference model has difference shape
-                    dist.recv(tensor=rec_val, src=0)
-                except RuntimeError as error:
-                    send_opt = dist.isend(tensor=torch.zeros(0), dst=2)
-                    send_opt.wait()
-                    e.wait()
-                    break
+            while data_size > batch_idx:
+                print("batch_idx:" + str(batch_idx))
+                rec_val = torch.zeros([100, 64, 32, 32])  # difference model has difference shape
+                dist.recv(tensor=rec_val, src=0)
+                print("after recv....")
                 outputs = layer(rec_val.cuda())
-                send_opt = dist.isend(tensor=outputs.cpu(), dst=2)
-                send_opt.wait()
+                dist.send(tensor=outputs.cpu(), dst=2)
                 batch_idx += 1
+                print("send...")
 
+            e.wait()
         elif dist.get_rank() == 2:
-            batch_idx = 0
             test_loss = 0
             correct = 0
             total = 0
             save_event.clear()
             global best_acc
-            while True:
-                try:
-                    rec_val = torch.zeros([100, 512, 2, 2]) #difference model has difference shape
-                    dist.recv(tensor=rec_val, src=1)
-                except RuntimeError as error:
-                    print("done....")
-                    acc = 100. * correct / total
-                    if acc > best_acc:
-                        best_acc = acc
-                        save_event.set()
-                    e.set()
-                    break
-                outputs = layer(rec_val.cuda())
-                targets = targets_queue.get(block=True, timeout=2)
-                targets = torch.from_numpy(targets).cuda()
+
+            for batch_idx, (inputs, targets) in enumerate(testloader):
+                rec_val = torch.zeros([100, 256, 8, 8])
+                dist.recv(tensor=rec_val, src=1)
+                outputs = layer(rec_val.cuda(0))
+                targets = targets.cuda()
                 loss = criterion(outputs, targets)
                 test_loss += loss.item()
                 _, predicted = outputs.max(1)
@@ -249,11 +233,16 @@ def eval(layer, logger, args, targets_queue, e, save_event, data_size, testloade
 
                 progress_bar(batch_idx, data_size, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                              % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
-                #if batch_idx % 10 == 0:
                 logger.error("eval:" + str(test_loss / (batch_idx + 1)))
                 acc_str = "eacc: %.3f" % (100. * correct / total,)
                 logger.error(acc_str)
-                batch_idx += 1
+            time.sleep(1)
+            acc = 100. * correct / total
+            if acc > best_acc:
+                best_acc = acc
+                save_event.set()
+            time.sleep(1)
+            e.set()
 
 
 def set_seed(seed):
@@ -275,6 +264,7 @@ def run(start_epoch, layer, args, grad_queue, targets_queue, global_event, epoch
     r = dist.get_rank()
     for epoch in range(start_epoch, start_epoch + epoch_num):
         print('Training epoch: %d' % epoch)
+        set_seed(epoch + 1)
         pipe_dream(layer, logger, args, backward_event, targets_queue, epoch_event, train_size, trainloader)
         epoch_event.clear()
         time.sleep(1)
@@ -344,18 +334,26 @@ if __name__ == "__main__":
     node_cfg_1 = [512, 512, 512, 512, 'M']
     node_cfg_2 = [512, 512, 512, 512, 'M']
     # res18
+    #shapes = [[args.batch_size, 64, 32, 32], [args.batch_size, 256, 8, 8]]
+    # res34
     shapes = [[args.batch_size, 64, 32, 32], [args.batch_size, 256, 8, 8]]
     if args.rank == 0:
         #layer = THResNet101Group0()
-        layer = VggLayer(node_cfg_0)
+        #layer = VggLayer(node_cfg_0)
+        #layer = THResNet18Group0()
+        layer = THResNet34Group0()
         layer.cuda()
     elif args.rank == 1:
         #layer = THResNet101Group1()
-        layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
+        #layer = THResNet18Group1()
+        #layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
+        layer = THResNet34Group1()
         layer.cuda()
     elif args.rank == 2:
         #layer = THResNet101Group2()
-        layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2], last_flag=True)
+        #layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2], last_flag=True)
+        #layer = THResNet18Group2()
+        layer = THResNet34Group2()
         layer.cuda()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     #layer.share_memory()
