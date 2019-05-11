@@ -101,7 +101,7 @@ class ResBlockLayer(nn.Module):
 
 class ResOutputLayer(nn.Module):
 
-    def __init__(self, block, num_classes=10):
+    def __init__(self, block, num_classes=200):
         super(ResOutputLayer, self).__init__()
         self.linear = nn.Linear(512 * block.expansion, num_classes)
 
