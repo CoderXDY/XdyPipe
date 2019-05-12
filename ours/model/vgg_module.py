@@ -20,7 +20,7 @@ class VggLayer(nn.Module):
         self.features = self._make_layers(init_channel, cfg)
         if self.last_flag:
             self.pool = nn.AvgPool2d(kernel_size=1, stride=1)
-            self.classifier = nn.Linear(512, 10)
+            self.classifier = nn.Linear(512, 200)
 
 
 
