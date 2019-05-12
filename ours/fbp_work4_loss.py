@@ -100,7 +100,7 @@ def dq_act(input, min=-0.0020, max=0.0020):
     return input
 
 
-def transfer(tag, send_buf, shape, half=False):
+def transfer(tag, send_buf, shape):
 
     if shape == None:
         left, right = get_left_right(tag)
@@ -110,10 +110,7 @@ def transfer(tag, send_buf, shape, half=False):
     elif not torch.is_tensor(send_buf):
         left, right = get_left_right(tag)
         try:
-            if half:
-                recv_buf = torch.HalfTensor(torch.Size(shape))
-            else:
-                recv_buf = torch.zeros(shape, dtype=torch.int8)#, dtype=torch.int8
+            recv_buf = torch.zeros(shape)  # , dtype=torch.int8
             dist.recv(tensor=recv_buf, src=left)
         except RuntimeError as error:
             print("runtime error..")
@@ -125,10 +122,7 @@ def transfer(tag, send_buf, shape, half=False):
         send_opt = dist.isend(tensor=send_buf, dst=right)
 
         try:
-            if half:
-                recv_buf = torch.HalfTensor(torch.Size(shape))
-            else:
-                recv_buf = torch.zeros(shape, dtype=torch.int8)
+            recv_buf = torch.zeros(shape)
             dist.recv(tensor=recv_buf, src=left)
         except RuntimeError as error:
             print("runtime error")
@@ -153,35 +147,7 @@ def get_left_right(tag):
     right = tag2rank[tag + 1]
     return left, right
 
-def transfer2(tag, send_buf, shape):
 
-    if shape == None:
-        left, right = get_left_right(tag)
-        send_opt = dist.isend(tensor=send_buf, dst=right)
-        send_opt.wait()
-        return None
-    elif not torch.is_tensor(send_buf):
-        left, right = get_left_right(tag)
-        try:
-            recv_buf = torch.zeros(shape)
-            dist.recv(tensor=recv_buf, src=left)
-        except RuntimeError as error:
-            print("runtime error..")
-            return None
-        return recv_buf
-
-    else:
-        left, right = get_left_right(tag)
-        send_opt = dist.isend(tensor=send_buf, dst=right)
-
-        try:
-            recv_buf = torch.zeros(shape)
-            dist.recv(tensor=recv_buf, src=left)
-        except RuntimeError as error:
-            print("runtime error")
-            return None
-        send_opt.wait()
-        return recv_buf
 
 
 
@@ -209,12 +175,12 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
     def backward_rank2():
         residual = None
         batch_idx = 0
-        ten_len = tensor_len(shapes[2])
-        grad_recv1 = torch.zeros(ten_len + 2)
+
+        grad_recv1 = torch.zeros(shapes[2])
         dist.recv(tensor=grad_recv1, src=3)
         while True:
             print(" backward batch_idx:" + str(batch_idx))
-            grad_recv1 = de_piecewise_quantize(grad_recv1.cuda(), shapes[2])
+            grad_recv1 = grad_recv1.cuda()
             try:
                 inputs, outputs = outputs_queue.get(block=True, timeout=4)
             except Empty:
@@ -222,28 +188,27 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 break
             inputs.requires_grad_()
             outputs.backward(grad_recv1)
-            inputs_grad, residual = piecewise_quantize(inputs.grad, logger=logger, residual=residual)
             if batch_idx % 3 == 0:
                  optimizer.step()
                  optimizer.zero_grad()
             batch_idx += 1
             if data_size == batch_idx:
-                transfer2(4, inputs_grad, None)
+                transfer(4, inputs.grad.cpu(), None)
                 print("backend In send..")
                 break
-            grad_recv1 = transfer2(4, inputs_grad, ten_len + 2)#shapes[1]
+            grad_recv1 = transfer(4, inputs.grad.cpu(), shapes[2])#shapes[1]
             print("backward send.......")
         print("backard end....")
 
     def backward_rank1():
         residual = None
         batch_idx = 0
-        ten_len = tensor_len(shapes[1])
-        grad_recv1 = torch.zeros(ten_len + 2)
+
+        grad_recv1 = torch.zeros(shapes[1])
         dist.recv(tensor=grad_recv1, src=2)
         while True:
             print(" backward batch_idx:" + str(batch_idx))
-            grad_recv1 = de_piecewise_quantize(grad_recv1.cuda(), shapes[1])
+            grad_recv1 = grad_recv1.cuda()
             try:
                 inputs, outputs = outputs_queue.get(block=True, timeout=4)
             except Empty:
@@ -251,26 +216,24 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
                 break
             inputs.requires_grad_()
             outputs.backward(grad_recv1)
-            inputs_grad, residual = piecewise_quantize(inputs.grad, logger=logger, residual=residual)
             if batch_idx % 3 == 0:
                  optimizer.step()
                  optimizer.zero_grad()
             batch_idx += 1
             if data_size == batch_idx:
-                transfer2(5, inputs_grad, None)
+                transfer(5, inputs.grad.cpu(), None)
                 print("backend In send..")
                 break
-            grad_recv1 = transfer2(5, inputs_grad, ten_len + 2)#shapes[1]
+            grad_recv1 = transfer(5, inputs.grad.cpu(), shapes[1])#shapes[1]
             print("backward send.......")
         print("backard end....")
 
     def backward_rank0(semaphore):
         batch_idx = 0
-        ten_len = tensor_len(shapes[0])
-        grad_recv = torch.zeros(ten_len + 2)
+        grad_recv = torch.zeros(shapes[0])
         dist.recv(tensor=grad_recv, src=1)
         while True:
-            grad_recv = de_piecewise_quantize(grad_recv.cuda(), shapes[0])
+            grad_recv = grad_recv.cuda()
             print(" backwardbatch_idx:" + str(batch_idx))
             try:
                 loss = outputs_queue.get(block=True, timeout=4)
@@ -287,7 +250,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             if data_size == batch_idx:
                 print("eq...")
                 break
-            grad_recv = transfer2(6, None, ten_len + 2)#shapes[0]
+            grad_recv = transfer(6, None, shapes[0])#shapes[0]
             print("backward send.....")
         print("backward end..")
 
@@ -301,7 +264,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             inputs = inputs.cuda()
             outputs = layer(inputs)
             outputs_queue.put(outputs)
-            outputs = q_act(outputs, char=True)
+            #outputs = q_act(outputs, char=True)
             transfer(dist.get_rank(), outputs.cpu(), None)
             print("send........")
         print("start to end....")
@@ -315,18 +278,16 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         outputs_queue = ThreadQueue(args.buffer_size)
         back_process = Process(target=backward_rank1, args=())
 
-        rec_val = torch.zeros(shapes[0], dtype=torch.int8)
+        rec_val = torch.zeros(shapes[0])
         dist.recv(tensor=rec_val, src=0)
         #fix bug..
         back_process.start()
         for index, (_, targets) in enumerate(trainloader):
             print("batch_idx:" + str(index))
-            rec_val = dq_act(rec_val)
             rec_val = rec_val.cuda()
             rec_val.requires_grad_()
             outputs = layer(rec_val)
             outputs_queue.put([rec_val, outputs])
-            outputs = q_act(outputs, char=True)
             if index == data_size - 1:
                 transfer(dist.get_rank(), outputs.cpu(), None)
                 print("the last send........")
@@ -345,17 +306,15 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         outputs_queue = ThreadQueue(args.buffer_size)
         back_process = Process(target=backward_rank2, args=())
 
-        rec_val = torch.zeros(shapes[1], dtype=torch.int8)
+        rec_val = torch.zeros(shapes[1])
         dist.recv(tensor=rec_val, src=1)
         back_process.start()
         for index, (_, targets) in enumerate(trainloader):
             print("batch_idx:" + str(index))
-            rec_val = dq_act(rec_val)
             rec_val = rec_val.cuda()
             rec_val.requires_grad_()
             outputs = layer(rec_val)
             outputs_queue.put([rec_val, outputs])
-            outputs = q_act(outputs, char=True)
             if index == data_size - 1:
                 transfer(dist.get_rank(), outputs.cpu(), None)
                 print("the last send........")
@@ -376,10 +335,9 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         total = 0
         criterion.cuda()
 
-        rec_val = torch.zeros(shapes[2], dtype=torch.int8)
+        rec_val = torch.zeros(shapes[2])
         dist.recv(tensor=rec_val, src=2)
         for batch_idx, (_, targets) in enumerate(trainloader):
-            rec_val = dq_act(rec_val)
             rec_val = rec_val.cuda()
             rec_val.requires_grad_()
             outputs = layer(rec_val)
@@ -387,9 +345,8 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             targets = targets.cuda()
             loss = criterion(outputs, targets)
             loss.backward()
-            quantize_grad, residual = piecewise_quantize(rec_val.grad, logger=logger, residual=residual)
-            quantize_grad = quantize_grad.cpu()
-            #quantize_grad = rec_val.grad.cpu()
+
+            quantize_grad = rec_val.grad.cpu()
             if batch_idx % 3 == 0:
                 optimizer.step()
                 train_loss += loss.item()
@@ -442,7 +399,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             batch_idx = 0
             while data_size > batch_idx:
                 print("batch_idx:" + str(batch_idx))
-                rec_val = torch.zeros([100, 256, 32, 32])  # difference model has difference shape
+                rec_val = torch.zeros([100, 128, 8, 8])  # difference model has difference shape
                 dist.recv(tensor=rec_val, src=0)
                 print("after recv....")
                 outputs = layer(rec_val.cuda())
@@ -456,7 +413,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             batch_idx = 0
             while data_size > batch_idx:
                 print("batch_idx:" + str(batch_idx))
-                rec_val = torch.zeros([100, 512, 16, 16])  # difference model has difference shape
+                rec_val = torch.zeros([100, 256, 4, 4])  # difference model has difference shape
                 dist.recv(tensor=rec_val, src=1)
                 print("after recv....")
                 outputs = layer(rec_val.cuda())
@@ -474,7 +431,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             global best_acc
 
             for batch_idx, (inputs, targets) in enumerate(testloader):
-                rec_val = torch.zeros([100, 1024, 8, 8])
+                rec_val = torch.zeros([100, 512, 2, 2])
                 dist.recv(tensor=rec_val, src=2)
                 outputs = layer(rec_val.cuda(0))
                 targets = targets.cuda()
@@ -511,8 +468,8 @@ def eval(layer, logger, e, save_event, data_size, testloader):
 
 
 def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader):
-    logger = logging.getLogger(args.model + '-fbp4-rank-' + str(dist.get_rank()))
-    file_handler = logging.FileHandler(args.model + '-fbp4-rank-' + str(dist.get_rank()) + '.log')
+    logger = logging.getLogger(args.model + '-fbp4loss-rank-' + str(dist.get_rank()))
+    file_handler = logging.FileHandler(args.model + '-fbp4loss-rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
@@ -536,7 +493,7 @@ def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_eve
                 'acc': best_acc,
                 'epoch': 0,
             }
-            torch.save(state, './checkpoint/' + args.model + '-fbp4-rank-' + str(r) + '_ckpt.t7')
+            torch.save(state, './checkpoint/' + args.model + '-fbp4loss-rank-' + str(r) + '_ckpt.t7')
         time.sleep(1)
     if r == 0 or r == 1 or r == 2:
         global_event.wait()
@@ -601,19 +558,30 @@ if __name__ == "__main__":
     grad_queue2 = m.get_grad_queue2()
     start_event2 = m.get_start_thread_event2()
 
-    #res34
-    shapes = [[args.batch_size, 256, 32, 32], [args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8]]
+    node_cfg_0 = [64, 64, 'M', 128, 128, 'M']
+    node_cfg_1 = [256, 256, 256, 256, 'M']
+    node_cfg_2 = [512, 512, 512, 512, 'M']
+    node_cfg_3 = [512, 512, 512, 512, 'M']
+    #res50
+    #shapes = [[args.batch_size, 256, 32, 32], [args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8]]
+    #vgg19
+    shapes = [[args.batch_size, 128, 8, 8], [args.batch_size, 256, 4, 4], [args.batch_size, 512, 2, 2]]
+
     if args.rank == 0:
-        layer = THResNet50Group40()
+        #layer = THResNet50Group40()
+        layer = VggLayer(node_cfg_0)
         layer.cuda()
     elif args.rank == 1:
-        layer = THResNet50Group41()
+        #layer = THResNet50Group41()
+        layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
         layer.cuda()
     elif args.rank == 2:
-        layer = THResNet50Group42()
+        #layer = THResNet50Group42()
+        layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2])
         layer.cuda()
     elif args.rank == 3:
-        layer = THResNet50Group43()
+        #layer = THResNet50Group43()
+        layer = VggLayer(node_cfg_3, node_cfg_2[-1] if node_cfg_2[-1] != 'M' else node_cfg_2[-2], last_flag=True)
         layer.cuda()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     #layer.share_memory()
@@ -624,7 +592,7 @@ if __name__ == "__main__":
     if args.resume:
         print('==> Resuming from checkpoint..')
         assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-        checkpoint = torch.load('./checkpoint/' + args.model + '-fbp4-rank-' + str(args.rank) + '_ckpt.t7')
+        checkpoint = torch.load('./checkpoint/' + args.model + '-fbp4loss-rank-' + str(args.rank) + '_ckpt.t7')
         layer.load_state_dict(checkpoint['net'])
         best_acc = checkpoint['acc']
         start_epoch = checkpoint['epoch']

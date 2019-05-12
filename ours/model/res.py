@@ -101,7 +101,7 @@ class ResBlockLayer(nn.Module):
 
 class ResOutputLayer(nn.Module):
 
-    def __init__(self, block, num_classes=200):
+    def __init__(self, block, num_classes=10):
         super(ResOutputLayer, self).__init__()
         self.linear = nn.Linear(512 * block.expansion, num_classes)
 
@@ -400,6 +400,83 @@ class THResNet101Group2(nn.Module):
 
 
 
+"""
+th node 4 for res50
+group 0:torch.Size([1, 256, 32, 32])
+group 1: torch.Size([1, 512, 16, 16])
+group 2: torch.Size([1, 1024, 8, 8])
+
+group 3: torch.Size([1, 10])
+
+"""
+class THResNet50Group40(nn.Module):
+    def __init__(self):
+        super(THResNet50Group40, self).__init__()
+        self.layer0 = ResInputLayer()
+        self.layer1 = ResBlockLayer(Bottleneck, 64, 3, 1, 64)
+
+
+    def forward(self, x):
+        out = self.layer0(x)
+        out = self.layer1(out)
+
+        return out
+
+
+class THResNet50Group41(nn.Module):
+    def __init__(self):
+        super(THResNet50Group41, self).__init__()
+        self.layer0 = ResBlockLayer(Bottleneck, 128, 4, 2, 256)
+
+
+    def forward(self, x):
+        out = self.layer0(x)
+
+        return out
+
+class THResNet50Group42(nn.Module):
+    def __init__(self):
+        super(THResNet50Group42, self).__init__()
+        self.layer1 = ResBlockLayer(Bottleneck, 256, 6, 2, 512)
+    def forward(self,out):
+        out = self.layer1(out)
+        return out
+
+
+
+class THResNet50Group43(nn.Module):
+    def __init__(self):
+        super(THResNet50Group43, self).__init__()
+        self.layer1 = ResBlockLayer(Bottleneck, 512, 3, 2, 1024)
+        self.layer2 = ResOutputLayer(Bottleneck)
+
+    def forward(self, out):
+        out = self.layer1(out)
+        out = self.layer2(out)
+        return out
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 """
 res101 for3 node
@@ -425,16 +502,32 @@ if __name__ == '__main__':
     # group0 = THResNet34Group0()
     # group1 = THResNet34Group1()
     # group2 = THResNet34Group2()
-    group0 = THResNet18Group0()
-    group1 = THResNet18Group1()
-    group2 = THResNet18Group2()
+    # group0 = THResNet18Group0()
+    # group1 = THResNet18Group1()
+    # group2 = THResNet18Group2()
+    # x = torch.randn(1, 3, 32, 32)
+    # x = group0(x)
+    # print("group 0:" + str(x.size()))
+    # x = group1(x)
+    # print("group 1: " + str(x.size()))
+    # y = group2(x)
+    # print(y.size())
+
+
+    ############
+    group0 = THResNet50Group40()
+    group1 = THResNet50Group41()
+    group2 = THResNet50Group42()
+    group3 = THResNet50Group43()
     x = torch.randn(1, 3, 32, 32)
     x = group0(x)
     print("group 0:" + str(x.size()))
     x = group1(x)
     print("group 1: " + str(x.size()))
-    y = group2(x)
-    print(y.size())
+    x = group2(x)
+    print("group 2: " + str(x.size()))
+    y = group3(x)
+    print("group 3: " + str(y.size()))
 
 
 

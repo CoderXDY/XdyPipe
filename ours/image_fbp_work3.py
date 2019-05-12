@@ -680,7 +680,7 @@ if __name__ == "__main__":
     parser.add_argument('-epoch', type=int, default=0)
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
     parser.add_argument('-model', help='the path fo share file system')
-    parser.add_argument('-buffer_size', type=int, help='size of batch', default=6)
+    parser.add_argument('-buffer_size', type=int, help='size of batch', default=5)
     parser.add_argument('-port', type=int, default=5000)
     args = parser.parse_args()
     print("ip: " + args.ip)
