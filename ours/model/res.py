@@ -398,6 +398,76 @@ class THResNet101Group2(nn.Module):
         return out
 
 
+#################################################################
+## res101 node 4
+"""
+group 0:torch.Size([1, 512, 16, 16])
+group 1: torch.Size([1, 1024, 8, 8])
+group 2: torch.Size([1, 1024, 8, 8])
+group 3: torch.Size([1, 10])
+
+
+"""
+class THResNet101Group40(nn.Module):
+    def __init__(self):
+        super(THResNet101Group40, self).__init__()
+        self.layer0 = ResInputLayer().cuda(0)
+        self.layer1 = ResBlockLayer(Bottleneck, 64, 3, 1, 64).cuda(0)
+        self.layer2 = ResBlockLayer(Bottleneck, 128, 4, 2, 256).cuda(1)
+
+    def forward(self, x):
+        out = self.layer0(x)
+        out = self.layer1(out)
+        out = out.cuda(1)
+        out = self.layer2(out)
+        return out.cuda(0)
+
+class THResNet101Group41(nn.Module):
+    def __init__(self):
+        super(THResNet101Group41, self).__init__()
+        self.layer = ResBlockLayer(Bottleneck, 256, 13, 2, 512)
+
+    def forward(self, x):
+        out = self.layer(x)
+        return out
+
+
+class THResNet101Group42(nn.Module):
+    def __init__(self):
+        super(THResNet101Group42, self).__init__()
+        self.layer0 = ResBlockLayer(Bottleneck, 256, 10, 1, 1024)
+    def forward(self, x):
+        out = self.layer0(x)
+        return out
+
+
+
+class THResNet101Group43(nn.Module):
+    def __init__(self):
+        super(THResNet101Group43, self).__init__()
+
+        self.layer1 = ResBlockLayer(Bottleneck, 512, 3, 2, 1024)
+        self.layer2 = ResOutputLayer(Bottleneck)
+
+    def forward(self, x):
+        out = self.layer1(x)
+        out = self.layer2(out)
+        return out
+
+
+
+
+
+
+##################################################################
+
+
+
+
+
+
+
+
 
 
 """
@@ -515,10 +585,10 @@ if __name__ == '__main__':
 
 
     ############
-    group0 = THResNet50Group40()
-    group1 = THResNet50Group41()
-    group2 = THResNet50Group42()
-    group3 = THResNet50Group43()
+    group0 = THResNet101Group40()
+    group1 = THResNet101Group41()
+    group2 = THResNet101Group42()
+    group3 = THResNet101Group43()
     x = torch.randn(1, 3, 32, 32)
     x = group0(x)
     print("group 0:" + str(x.size()))

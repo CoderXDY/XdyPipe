@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import logging
 import time
-from model.res import THResNet50Group40, THResNet50Group41, THResNet50Group42, THResNet50Group43
+from model.res import THResNet101Group40, THResNet101Group41, THResNet101Group42, THResNet101Group43
 from model.vgg_module import VggLayer
 from model.googlenet import GoogleNetGroup0, GoogleNetGroup1, GoogleNetGroup2
 from model.dpn import  THDPNGroup0, THDPNGroup1, THDPNGroup2
@@ -399,7 +399,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             batch_idx = 0
             while data_size > batch_idx:
                 print("batch_idx:" + str(batch_idx))
-                rec_val = torch.zeros([100, 128, 8, 8])  # difference model has difference shape
+                rec_val = torch.zeros([100, 512, 16, 16])  # difference model has difference shape
                 dist.recv(tensor=rec_val, src=0)
                 print("after recv....")
                 outputs = layer(rec_val.cuda())
@@ -413,7 +413,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             batch_idx = 0
             while data_size > batch_idx:
                 print("batch_idx:" + str(batch_idx))
-                rec_val = torch.zeros([100, 256, 4, 4])  # difference model has difference shape
+                rec_val = torch.zeros([100, 1024, 8, 8])  # difference model has difference shape
                 dist.recv(tensor=rec_val, src=1)
                 print("after recv....")
                 outputs = layer(rec_val.cuda())
@@ -431,7 +431,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             global best_acc
 
             for batch_idx, (inputs, targets) in enumerate(testloader):
-                rec_val = torch.zeros([100, 512, 2, 2])
+                rec_val = torch.zeros([100, 1024, 8, 8])
                 dist.recv(tensor=rec_val, src=2)
                 outputs = layer(rec_val.cuda(0))
                 targets = targets.cuda()
@@ -565,23 +565,24 @@ if __name__ == "__main__":
     #res50
     #shapes = [[args.batch_size, 256, 32, 32], [args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8]]
     #vgg19
-    shapes = [[args.batch_size, 128, 8, 8], [args.batch_size, 256, 4, 4], [args.batch_size, 512, 2, 2]]
-
+    #shapes = [[args.batch_size, 128, 8, 8], [args.batch_size, 256, 4, 4], [args.batch_size, 512, 2, 2]]
+    #res101
+    shapes = [[args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8], [args.batch_size, 1024, 8, 8]]
     if args.rank == 0:
-        #layer = THResNet50Group40()
-        layer = VggLayer(node_cfg_0)
-        layer.cuda()
+        layer = THResNet101Group40()
+        #layer = VggLayer(node_cfg_0)
+        #layer.cuda()
     elif args.rank == 1:
-        #layer = THResNet50Group41()
-        layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
+        layer = THResNet101Group41()
+        #layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
         layer.cuda()
     elif args.rank == 2:
-        #layer = THResNet50Group42()
-        layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2])
+        layer = THResNet101Group42()
+        #layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2])
         layer.cuda()
     elif args.rank == 3:
-        #layer = THResNet50Group43()
-        layer = VggLayer(node_cfg_3, node_cfg_2[-1] if node_cfg_2[-1] != 'M' else node_cfg_2[-2], last_flag=True)
+        layer = THResNet101Group43()
+        #layer = VggLayer(node_cfg_3, node_cfg_2[-1] if node_cfg_2[-1] != 'M' else node_cfg_2[-2], last_flag=True)
         layer.cuda()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     #layer.share_memory()
