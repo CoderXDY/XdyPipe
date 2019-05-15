@@ -88,24 +88,98 @@ if __name__ == '__main__':
     torch.Size([2, 256, 4, 4])
     torch.Size([2, 512, 2, 2])
 
+    # node_cfg_0 = [64, 64, 'M', 128, 128, 'M']
+    # node_cfg_1 = [256, 256, 256, 256, 'M']
+    # node_cfg_2 = [512, 512, 512, 512, 'M']
+    # node_cfg_3 = [512, 512, 512, 512, 'M']
+    """
+
+
+    """
+    torch.Size([2, 128, 8, 8])
+    torch.Size([2, 512, 4, 4])
+    torch.Size([2, 512, 2, 2])
+      node_cfg_0 = [64, 64, 'M', 128, 128, 'M']
+    node_cfg_1 = [256, 256, 256, 256, 'M', 512]
+    node_cfg_2 = [512, 512, 512, 'M', 512, ]
+    node_cfg_3 = [512, 512, 512, 'M']
+    """
+
+
+
+    """
+    torch.Size([2, 64, 16, 16])
+    torch.Size([2, 256, 8, 8])
+    torch.Size([2, 512, 4, 4])
+        node_cfg_0 = [64, 64, 'M']
+    node_cfg_1 = [128, 128, 'M', 256, 256]
+    node_cfg_2 = [256, 256, 'M', 512, 512]
+    node_cfg_3 = [512, 512, 'M', 512, 512, 512, 512, 'M']
+    """
+
+    """
+    torch.Size([2, 256, 8, 8])
+    torch.Size([2, 256, 4, 4])
+    torch.Size([2, 512, 4, 4])
+    node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256]
+    node_cfg_1 = [256, 256, 256, 'M']
+    node_cfg_2 = [512, 512, 512]
+    node_cfg_3 = [512, 'M', 512, 512, 512, 512, 'M']
     
     """
-    node_cfg_0 = [64, 64, 'M', 128, 128, 'M']
-    node_cfg_1 = [256, 256, 256, 256, 'M']
-    node_cfg_2 = [512, 512, 512, 512, 'M']
-    node_cfg_3 = [512, 512, 512, 512, 'M']
+    """
+    torch.Size([2, 256, 8, 8])
+    torch.Size([2, 512, 4, 4])
+    torch.Size([2, 512, 2, 2])
+  node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256]
+    node_cfg_1 = [256, 'M', 512, 512]
+    node_cfg_2 = [512, 512, 'M', 512, 512]
+    node_cfg_3 = [512, 512, 'M']
+    
+    """
 
-    group0 = VggLayer(node_cfg_0)
-    group1 = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
-    group2 = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2])
-    group3 = VggLayer(node_cfg_3, node_cfg_2[-1] if node_cfg_2[-1] != 'M' else node_cfg_2[-2], last_flag=True)
+    """
+    torch.Size([2, 256, 8, 8])
+torch.Size([2, 512, 4, 4])
+torch.Size([2, 512, 2, 2])
+
+    
+    """
+    """
+    torch.Size([2, 256, 8, 8])
+    torch.Size([2, 512, 4, 4])
+    torch.Size([2, 512, 2, 2])
+    """
+    # node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256]
+    # node_cfg_1 = [256, 'M', 512, 512,512, 512]
+    # node_cfg_2 = ['M', 512, 512]
+    # node_cfg_3 = [512, 512, 'M']
+    # group0 = VggLayer(node_cfg_0)
+    # group1 = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
+    # group2 = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2])
+    # group3 = VggLayer(node_cfg_3, node_cfg_2[-1] if node_cfg_2[-1] != 'M' else node_cfg_2[-2], last_flag=True)
+    # x = torch.randn(2, 3, 32, 32)
+    # out = group0(x)
+    # print(out.size())
+    # out = group1(out)
+    # print(out.size())
+    # out = group2(out)
+    # print(out.size())
+    # out = group3(out)
+    # print(out.size())
+
+
+    node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512]
+    node_cfg_1 = [512, 512, 'M', 512, 512,512, 512, 'M']
+    layer0 = VggLayer(node_cfg_0)
+    layer1 = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2], last_flag=True)
     x = torch.randn(2, 3, 32, 32)
-    out = group0(x)
+    out = layer0(x)
     print(out.size())
-    out = group1(out)
+    out = layer1(out)
     print(out.size())
-    out = group2(out)
-    print(out.size())
+
+
 
 
 

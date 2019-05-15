@@ -365,20 +365,19 @@ class THResNet101Group0(nn.Module):
     def __init__(self):
         super(THResNet101Group0, self).__init__()
         self.layer0 = ResInputLayer().cuda(0)
-        self.layer1 = ResBlockLayer(Bottleneck, 64, 3, 1, 64).cuda(0)
-        self.layer2 = ResBlockLayer(Bottleneck, 128, 4, 2, 256).cuda(1)
+        self.layer1 = ResBlockLayer(Bottleneck, 64, 3, 1, 64)
+        self.layer2 = ResBlockLayer(Bottleneck, 128, 4, 2, 256)
 
     def forward(self, x):
         out = self.layer0(x)
         out = self.layer1(out)
-        out = out.cuda(1)
         out = self.layer2(out)
         return out
 
 class THResNet101Group1(nn.Module):
     def __init__(self):
         super(THResNet101Group1, self).__init__()
-        self.layer = ResBlockLayer(Bottleneck, 256, 13, 2, 512).cuda(0)
+        self.layer = ResBlockLayer(Bottleneck, 256, 13, 2, 512)
 
     def forward(self, x):
         out = self.layer(x)
@@ -387,12 +386,12 @@ class THResNet101Group1(nn.Module):
 class THResNet101Group2(nn.Module):
     def __init__(self):
         super(THResNet101Group2, self).__init__()
-        self.layer0 = ResBlockLayer(Bottleneck, 256, 10, 1, 1024).cuda(0)
-        self.layer1 = ResBlockLayer(Bottleneck, 512, 3, 2, 1024).cuda(0)
-        self.layer2 = ResOutputLayer(Bottleneck).cuda(0)
+        self.layer0 = ResBlockLayer(Bottleneck, 256, 10, 1, 1024)
+        self.layer1 = ResBlockLayer(Bottleneck, 512, 3, 2, 1024)
+        self.layer2 = ResOutputLayer(Bottleneck)
 
     def forward(self, x):
-        out = self.layer0(x).cuda(0)
+        out = self.layer0(x)
         out = self.layer1(out)
         out = self.layer2(out)
         return out
@@ -412,15 +411,16 @@ class THResNet101Group40(nn.Module):
     def __init__(self):
         super(THResNet101Group40, self).__init__()
         self.layer0 = ResInputLayer().cuda(0)
-        self.layer1 = ResBlockLayer(Bottleneck, 64, 3, 1, 64).cuda(0)
-        self.layer2 = ResBlockLayer(Bottleneck, 128, 4, 2, 256).cuda(1)
+        self.layer1 = ResBlockLayer(Bottleneck, 64, 3, 1, 64)#.cuda(0)
+        self.layer2 = ResBlockLayer(Bottleneck, 128, 4, 2, 256)#.cuda(1)
 
     def forward(self, x):
         out = self.layer0(x)
         out = self.layer1(out)
-        out = out.cuda(1)
+        #out = out.cuda(1)
         out = self.layer2(out)
-        return out.cuda(0)
+        #return out.cuda(0)
+        return out
 
 class THResNet101Group41(nn.Module):
     def __init__(self):
@@ -460,6 +460,66 @@ class THResNet101Group43(nn.Module):
 
 
 ##################################################################
+
+
+
+"""
+
+group 0:torch.Size([1, 64, 32, 32])
+
+group 1: torch.Size([1, 128, 16, 16])
+group 2: torch.Size([1, 256, 8, 8])
+
+group 3: torch.Size([1, 10])
+
+
+
+"""
+
+
+class THResNet34Group40(nn.Module):
+    def __init__(self):
+        super(THResNet34Group40, self).__init__()
+        self.layer0 = ResInputLayer()
+        self.layer1 = ResBlockLayer(BasicBlock, 64, 3, 1, 64)
+    def forward(self, out):
+        out = self.layer0(out)
+        out = self.layer1(out)
+        return out
+
+
+class THResNet34Group41(nn.Module):
+    def __init__(self):
+        super(THResNet34Group41, self).__init__()
+        self.layer0 = ResBlockLayer(BasicBlock, 128, 4, 2, 64)
+
+    def forward(self, out):
+        out = self.layer0(out)
+
+        return out
+
+class THResNet34Group42(nn.Module):
+    def __init__(self):
+        super(THResNet34Group42, self).__init__()
+
+        self.layer1 = ResBlockLayer(BasicBlock, 256, 6, 2, 128)
+    def forward(self, out):
+
+        out = self.layer1(out)
+        return out
+
+class THResNet34Group43(nn.Module):
+    def __init__(self):
+        super(THResNet34Group43, self).__init__()
+        self.layer0 = ResBlockLayer(BasicBlock, 512, 3, 2, 256)
+        self.layer1 = ResOutputLayer(BasicBlock)
+    def forward(self, out):
+        out = self.layer0(out)
+        out = self.layer1(out)
+        return out
+
+
+
 
 
 
@@ -533,10 +593,78 @@ class THResNet50Group43(nn.Module):
 
 
 
+class THResNet101Group20(nn.Module):
+    def __init__(self):
+        super(THResNet101Group20, self).__init__()
+        self.layer0 = ResInputLayer()
+        self.layer1 = ResBlockLayer(Bottleneck, 64, 3, 1, 64)
+        self.layer2 = ResBlockLayer(Bottleneck, 128, 4, 2, 256)
+        self.layer3 = ResBlockLayer(Bottleneck, 256, 13, 2, 512)
+    def forward(self, x):
+        out = self.layer0(x)
+        out = self.layer1(out)
+        out = self.layer2(out)
+        out = self.layer3(out)
+        return out
+
+class THResNet101Group21(nn.Module):
+    def __init__(self):
+        super(THResNet101Group21, self).__init__()
+        self.layer0 = ResBlockLayer(Bottleneck, 256, 10, 1, 1024)
+        self.layer1 = ResBlockLayer(Bottleneck, 512, 3, 2, 1024)
+        self.layer2 = ResOutputLayer(Bottleneck)
+
+    def forward(self, x):
+        out = self.layer0(x)
+        out = self.layer1(out)
+        out = self.layer2(out)
+        return out
 
 
 
+"""
+group 0:torch.Size([1, 256, 32, 32])
+group 1: torch.Size([1, 1024, 8, 8])
 
+
+"""
+
+class NTHResNet101Group0(nn.Module):
+    def __init__(self):
+        super(NTHResNet101Group0, self).__init__()
+        self.layer0 = ResInputLayer()
+        self.layer1 = ResBlockLayer(Bottleneck, 64, 3, 1, 64)
+
+
+    def forward(self, x):
+        out = self.layer0(x)
+        out = self.layer1(out)
+
+        return out
+
+class NTHResNet101Group1(nn.Module):
+    def __init__(self):
+        super(NTHResNet101Group1, self).__init__()
+        self.layer2 = ResBlockLayer(Bottleneck, 128, 4, 2, 256)
+        self.layer = ResBlockLayer(Bottleneck, 256, 13, 2, 512)
+
+    def forward(self, out):
+        out = self.layer2(out)
+        out = self.layer(out)
+        return out
+
+class NTHResNet101Group2(nn.Module):
+    def __init__(self):
+        super(NTHResNet101Group2, self).__init__()
+        self.layer0 = ResBlockLayer(Bottleneck, 256, 10, 1, 1024)
+        self.layer1 = ResBlockLayer(Bottleneck, 512, 3, 2, 1024)
+        self.layer2 = ResOutputLayer(Bottleneck)
+
+    def forward(self, x):
+        out = self.layer0(x)
+        out = self.layer1(out)
+        out = self.layer2(out)
+        return out
 
 
 
@@ -562,9 +690,9 @@ torch.Size([1, 10])
 
 """
 if __name__ == '__main__':
-    # group0 = THResNet101Group0()
-    # group1 = THResNet101Group1()
-    # group2 = THResNet101Group2()
+    group0 = NTHResNet101Group0()
+    group1 = NTHResNet101Group1()
+    group2 = NTHResNet101Group2()
     # group0 = THResNet50Group30()
     # group1 = THResNet50Group31()
     # group2 = THResNet50Group32()
@@ -575,29 +703,31 @@ if __name__ == '__main__':
     # group0 = THResNet18Group0()
     # group1 = THResNet18Group1()
     # group2 = THResNet18Group2()
-    # x = torch.randn(1, 3, 32, 32)
-    # x = group0(x)
-    # print("group 0:" + str(x.size()))
-    # x = group1(x)
-    # print("group 1: " + str(x.size()))
-    # y = group2(x)
-    # print(y.size())
-
-
-    ############
-    group0 = THResNet101Group40()
-    group1 = THResNet101Group41()
-    group2 = THResNet101Group42()
-    group3 = THResNet101Group43()
     x = torch.randn(1, 3, 32, 32)
     x = group0(x)
     print("group 0:" + str(x.size()))
     x = group1(x)
     print("group 1: " + str(x.size()))
-    x = group2(x)
-    print("group 2: " + str(x.size()))
-    y = group3(x)
-    print("group 3: " + str(y.size()))
+    y = group2(x)
+    print(y.size())
+
+
+    ############
+    # group0 = THResNet34Group40()
+    # group1 = THResNet34Group41()
+    # group2 = THResNet34Group42()
+    # group3 = THResNet34Group43()
+    # x = torch.randn(1, 3, 32, 32)
+    # x = group0(x)
+    # print("group 0:" + str(x.size()))
+    # x = group1(x)
+    # print("group 1: " + str(x.size()))
+    # x = group2(x)
+    # print("group 2: " + str(x.size()))
+    # y = group3(x)
+    # print("group 3: " + str(y.size()))
+
+
 
 
 
