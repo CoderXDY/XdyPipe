@@ -4,6 +4,7 @@ from torch import nn as nn
 import argparse
 
 from torch.multiprocessing import Queue, Event
+from torch.multiprocessing import Process as P
 from multiprocessing.managers import BaseManager as bm
 from multiprocessing.dummy import Process
 from multiprocessing.dummy import Queue as ThreadQueue
@@ -304,6 +305,11 @@ def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_eve
         global_event.set()
 
 
+def init_processes(run, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size,
+        test_size, trainloader, testloader, rank):
+    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=rank)
+    run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size,
+        test_size, trainloader, testloader)
 
 
 
@@ -319,7 +325,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ip', help='the ip of master', default='89.72.2.41')
-    parser.add_argument('-size', type=int, help='input the sum of node', default=2)
+    parser.add_argument('-size', type=int, help='input the sum of node', default=3)
     parser.add_argument('-path', help='the path fo share file system',
                         default='file:///WORK/sysu_wgwu_4/xpipe/ours/temp')
     parser.add_argument('-rank', type=int, help='the rank of process')
@@ -376,6 +382,7 @@ if __name__ == "__main__":
         #layer = VggLayer(node_cfg_0)
         layer = THResNet101Group20()
         layer.cuda(0)
+        layer.share_memory()
     elif args.rank == 1:
         #layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2], last_flag=True)
         #layer = GoogleNetGroup1()
@@ -385,25 +392,13 @@ if __name__ == "__main__":
         #layer = THResNet34Group1()
         #layer = THResNet18Group1()
         layer = THResNet101Group21()
-        layer.cuda(1)
+        layer.cuda(0)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     #layer.share_memory()
     cudnn.benchmark = True
 
     best_acc = 0.0
     start_epoch = 0
-    if args.resume:
-        print('==> Resuming from checkpoint..')
-        assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-        checkpoint = torch.load('./checkpoint/' + args.model + '-f2-rank-' + str(args.rank) + '_ckpt.t7')
-        layer.load_state_dict(checkpoint['net'])
-        best_acc = checkpoint['acc']
-        start_epoch = checkpoint['epoch']
-        print("best_acc: " + str(best_acc))
-        print("start_epoch: " + str(start_epoch))
-
-    print("init process-" + str(args.rank) + "....")
-    dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
 
     if True:
         transform_train = transforms.Compose([
@@ -433,4 +428,13 @@ if __name__ == "__main__":
 
     if args.epoch != 0:
         start_epoch = args.epoch
-    run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader)
+
+
+
+    if args.rank == 1:
+        dist.init_process_group(backend='tcp', init_method=args.path, world_size=args.size, rank=args.rank)
+        run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size,
+            test_size, trainloader, testloader)
+    elif args.rank == 0:
+        p0 = P(target=init_processes, args=(run, start_epoch, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, 0))
+        p1 = P(target=init_processes, args=(run, start_epoch, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader, 2))

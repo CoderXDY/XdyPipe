@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import logging
 import time
-from model.res import THResNet101Group0, THResNet101Group2, THResNet101Group1, THResNet50Group30, THResNet50Group31, THResNet50Group32, THResNet34Group0, THResNet34Group1, THResNet34Group2, THResNet18Group0, THResNet18Group1, THResNet18Group2
+from model.res import THResNet101Group20, THResNet101Group21, THResNet101Group1, THResNet50Group30, THResNet50Group31, THResNet50Group32, THResNet34Group0, THResNet34Group1, THResNet34Group2, THResNet18Group0, THResNet18Group1, THResNet18Group2
 from model.vgg_module import VggLayer
 from model.googlenet import GoogleNetGroup0, GoogleNetGroup1, GoogleNetGroup2
 from model.dpn import  THDPNGroup0, THDPNGroup1, THDPNGroup2
@@ -36,10 +36,8 @@ def get_left_right(tag):
         -1: 0,
         0: 0,
         1: 1,
-        2: 2,
-        3: 1,
-        4: 0,
-        5: 0
+        2: 0,
+        3: 0
     }
     left = tag2rank[tag - 1]
     right = tag2rank[tag + 1]
@@ -100,33 +98,6 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
     optimizer.zero_grad()
     layer.train()
     batch_idx = 0
-
-    def backward_rank1():
-        batch_idx = 0
-        grad_recv1 = torch.zeros(shapes[1])
-        dist.recv(tensor=grad_recv1, src=2)
-        while True:
-            print(" backward batch_idx:" + str(batch_idx))
-            grad_recv1 = grad_recv1.cuda(1)
-            try:
-                inputs, outputs = outputs_queue.get(block=True, timeout=4)
-            except Empty:
-                print("empty........")
-                break
-            inputs.requires_grad_()
-            outputs.backward(grad_recv1)
-            if batch_idx % args.ac == 0:
-                 optimizer.step()
-                 optimizer.zero_grad()
-            batch_idx += 1
-            if data_size == batch_idx:
-                transfer(3, inputs.grad.cpu(), None)
-                print("backend In send..")
-                break
-            grad_recv1 = transfer(3, inputs.grad.cpu(), shapes[1])#shapes[1]
-            print("backward send.......")
-        print("backard end....")
-
     def backward_rank0(semaphore):
         batch_idx = 0
         grad_recv = torch.zeros(shapes[0])
@@ -150,7 +121,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             if data_size == batch_idx:
                 print("eq...")
                 break
-            grad_recv = transfer(4, None, shapes[0])#shapes[0]
+            grad_recv = transfer(2, None, shapes[0])#shapes[0]
             print("backward send.....")
         print("backward end..")
 
@@ -160,7 +131,6 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         back_process = Process(target=backward_rank0, args=(semaphore,))
         back_process.start()
         for batch_idx, (inputs, targets) in enumerate(trainloader):
-            #semaphore.acquire()
             print("batch: " + str(batch_idx))
             inputs = inputs.cuda(0)
             outputs = layer(inputs)
@@ -177,48 +147,21 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
 
     elif dist.get_rank() == 1:
 
-        outputs_queue = ThreadQueue(args.buffer_size)
-        back_process = Process(target=backward_rank1, args=())
-
-        rec_val = torch.zeros(shapes[0])
-        dist.recv(tensor=rec_val, src=0)
-        #fix bug..
-        back_process.start()
-        for index, (_, targets) in enumerate(trainloader):
-            print("batch_idx:" + str(index))
-            rec_val = rec_val.cuda(1)
-            rec_val.requires_grad_()
-            outputs = layer(rec_val)
-            outputs_queue.put([rec_val, outputs])
-            if index == data_size - 1:
-                transfer(dist.get_rank(), outputs.cpu(), None)
-                print("the last send........")
-                continue
-            rec_val = transfer(dist.get_rank(), outputs.cpu(), shapes[0])
-            print("send.................")
-        print("start to end....")
-        back_process.join()
-
-        e.wait()
-        print("end......")
-
-    elif dist.get_rank() == 2:
-
         rec_val = None
         residual = None
         train_loss = 0
         correct = 0
         total = 0
-        criterion.cuda(2)
+        criterion.cuda(1)
         if not torch.is_tensor(rec_val):
-            rec_val = torch.zeros(shapes[1])
-            dist.recv(tensor=rec_val, src=1)
+            rec_val = torch.zeros(shapes[0])
+            dist.recv(tensor=rec_val, src=0)
         for batch_idx, (_, targets) in enumerate(trainloader):
-            rec_val = rec_val.cuda(2)
+            rec_val = rec_val.cuda(1)
             rec_val.requires_grad_()
             outputs = layer(rec_val)
             # start to backward....
-            targets = targets.cuda(2)
+            targets = targets.cuda(1)
             loss = criterion(outputs, targets)
             loss.backward()
 
@@ -240,7 +183,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
             if batch_idx == data_size - 1:
                 transfer(dist.get_rank(), rec_val.grad.cpu(), None)
                 continue
-            rec_val = transfer(dist.get_rank(), rec_val.grad.cpu(), shapes[1])
+            rec_val = transfer(dist.get_rank(), rec_val.grad.cpu(), shapes[0])
 
         #print("\n start to end....")
         e.wait()
@@ -274,7 +217,7 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             batch_idx = 0
             while data_size > batch_idx:
                 print("batch_idx:" + str(batch_idx))
-                rec_val = torch.zeros([100, 64, 32, 32])  # difference model has difference shape
+                rec_val = torch.zeros([100, 1024, 8, 8])  # difference model has difference shape
                 dist.recv(tensor=rec_val, src=0)
                 print("after recv....")
                 outputs = layer(rec_val.cuda(1))
@@ -328,8 +271,8 @@ def eval(layer, logger, e, save_event, data_size, testloader):
 
 
 def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader):
-    logger = logging.getLogger(args.model + '-f3-rank-' + str(dist.get_rank()))
-    file_handler = logging.FileHandler(args.model + '-f3-rank-' + str(dist.get_rank()) + '.log')
+    logger = logging.getLogger(args.model + '-f2-rank-' + str(dist.get_rank()))
+    file_handler = logging.FileHandler(args.model + '-f2-rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
@@ -353,7 +296,7 @@ def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_eve
         #         'acc': best_acc,
         #         'epoch': 0,
         #     }
-        #     torch.save(state, './checkpoint/' + args.model + '-f3-rank-' + str(r) + '_ckpt.t7')
+        #     torch.save(state, './checkpoint/' + args.model + '-f2-rank-' + str(r) + '_ckpt.t7')
         # time.sleep(1)
     if r == 0 or r == 1:
         global_event.wait()
@@ -376,7 +319,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ip', help='the ip of master', default='89.72.2.41')
-    parser.add_argument('-size', type=int, help='input the sum of node', default=3)
+    parser.add_argument('-size', type=int, help='input the sum of node', default=2)
     parser.add_argument('-path', help='the path fo share file system',
                         default='file:///WORK/sysu_wgwu_4/xpipe/ours/temp')
     parser.add_argument('-rank', type=int, help='the rank of process')
@@ -385,7 +328,7 @@ if __name__ == "__main__":
     parser.add_argument('-epoch', type=int, default=0)
     parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
     parser.add_argument('-model', help='the path fo share file system')
-    parser.add_argument('-buffer_size', type=int, help='size of batch', default=5)
+    parser.add_argument('-buffer_size', type=int, help='size of batch', default=3)
     parser.add_argument('-port', type=int, default=5000)
     parser.add_argument('-ac', type=int, default=2)
     args = parser.parse_args()
@@ -422,51 +365,27 @@ if __name__ == "__main__":
     """
         difference model
         """
-    node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M']
-    node_cfg_1 = [512, 512, 512, 512, 'M']
-    node_cfg_2 = [512, 512, 512, 512, 'M']
+    #node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512]
+    #node_cfg_1 = [512, 512, 'M', 512, 512,512, 512, 'M']
 
     #vgg19
-    #shapes = [[args.batch_size, 256, 4, 4], [args.batch_size, 512, 2, 2]]
+    #shapes = [[args.batch_size, 512, 4, 4]]
     #res101
-    shapes = [[args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8]]
-    #googlenet
-    #shapes = [[args.batch_size, 480, 16, 16], [args.batch_size, 832, 8, 8]]
-    #res50
-    #shapes = [[args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8]]#old
-    #shapes = [[args.batch_size, 256, 32, 32], [args.batch_size, 1024, 8, 8]]
-    # res34
-    #shapes = [[args.batch_size, 64, 32, 32], [args.batch_size, 256, 8, 8]]
-    #res18
-    #shapes = [[args.batch_size, 64, 32, 32], [args.batch_size, 256, 8, 8]]
+    shapes =[[args.batch_size, 1024, 8, 8]]
     if args.rank == 0:
-        layer = THResNet101Group0()
-        #layer = GoogleNetGroup0()
         #layer = VggLayer(node_cfg_0)
-        #layer = THDPNGroup0()
-        #layer = THResNet50Group30()
-        ## big model do not use
-        #layer = THResNet34Group0()
-        #layer = THResNet18Group0()
+        layer = THResNet101Group20()
         layer.cuda(0)
     elif args.rank == 1:
-        layer = THResNet101Group1()
+        #layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2], last_flag=True)
         #layer = GoogleNetGroup1()
         #layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
         #layer = THDPNGroup1()
         #layer = THResNet50Group31()
         #layer = THResNet34Group1()
         #layer = THResNet18Group1()
+        layer = THResNet101Group21()
         layer.cuda(1)
-    elif args.rank == 2:
-        layer = THResNet101Group2()
-        #layer = GoogleNetGroup2()
-        #layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2], last_flag=True)
-        #layer = THDPNGroup2()
-        #layer = THResNet50Group32()
-        #layer = THResNet34Group2()
-        #layer = THResNet18Group2()
-        layer.cuda(2)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     #layer.share_memory()
     cudnn.benchmark = True
@@ -476,7 +395,7 @@ if __name__ == "__main__":
     if args.resume:
         print('==> Resuming from checkpoint..')
         assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-        checkpoint = torch.load('./checkpoint/' + args.model + '-f3-rank-' + str(args.rank) + '_ckpt.t7')
+        checkpoint = torch.load('./checkpoint/' + args.model + '-f2-rank-' + str(args.rank) + '_ckpt.t7')
         layer.load_state_dict(checkpoint['net'])
         best_acc = checkpoint['acc']
         start_epoch = checkpoint['epoch']

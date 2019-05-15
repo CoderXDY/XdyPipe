@@ -180,7 +180,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         dist.recv(tensor=grad_recv1, src=3)
         while True:
             print(" backward batch_idx:" + str(batch_idx))
-            grad_recv1 = grad_recv1.cuda()
+            grad_recv1 = grad_recv1.cuda(2)
             try:
                 inputs, outputs = outputs_queue.get(block=True, timeout=4)
             except Empty:
@@ -208,7 +208,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         dist.recv(tensor=grad_recv1, src=2)
         while True:
             print(" backward batch_idx:" + str(batch_idx))
-            grad_recv1 = grad_recv1.cuda()
+            grad_recv1 = grad_recv1.cuda(1)
             try:
                 inputs, outputs = outputs_queue.get(block=True, timeout=4)
             except Empty:
@@ -233,7 +233,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         grad_recv = torch.zeros(shapes[0])
         dist.recv(tensor=grad_recv, src=1)
         while True:
-            grad_recv = grad_recv.cuda()
+            grad_recv = grad_recv.cuda(0)
             print(" backwardbatch_idx:" + str(batch_idx))
             try:
                 loss = outputs_queue.get(block=True, timeout=4)
@@ -261,7 +261,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         back_process.start()
         for batch_idx, (inputs, targets) in enumerate(trainloader):
             print("batch: " + str(batch_idx))
-            inputs = inputs.cuda()
+            inputs = inputs.cuda(0)
             outputs = layer(inputs)
             outputs_queue.put(outputs)
             #outputs = q_act(outputs, char=True)
@@ -284,7 +284,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         back_process.start()
         for index, (_, targets) in enumerate(trainloader):
             print("batch_idx:" + str(index))
-            rec_val = rec_val.cuda()
+            rec_val = rec_val.cuda(1)
             rec_val.requires_grad_()
             outputs = layer(rec_val)
             outputs_queue.put([rec_val, outputs])
@@ -311,7 +311,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         back_process.start()
         for index, (_, targets) in enumerate(trainloader):
             print("batch_idx:" + str(index))
-            rec_val = rec_val.cuda()
+            rec_val = rec_val.cuda(2)
             rec_val.requires_grad_()
             outputs = layer(rec_val)
             outputs_queue.put([rec_val, outputs])
@@ -333,16 +333,16 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
         train_loss = 0
         correct = 0
         total = 0
-        criterion.cuda()
+        criterion.cuda(3)
 
         rec_val = torch.zeros(shapes[2])
         dist.recv(tensor=rec_val, src=2)
         for batch_idx, (_, targets) in enumerate(trainloader):
-            rec_val = rec_val.cuda()
+            rec_val = rec_val.cuda(3)
             rec_val.requires_grad_()
             outputs = layer(rec_val)
             # start to backward....
-            targets = targets.cuda()
+            targets = targets.cuda(3)
             loss = criterion(outputs, targets)
             loss.backward()
 
@@ -383,7 +383,7 @@ def train(layer, logger, shapes, args, e, data_size, trainloader):
 
 def eval(layer, logger, e, save_event, data_size, testloader):
     criterion = nn.CrossEntropyLoss()
-    criterion.cuda()
+    criterion.cuda(3)
     layer.eval()
     with torch.no_grad():
         if dist.get_rank() == 0:
@@ -399,10 +399,10 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             batch_idx = 0
             while data_size > batch_idx:
                 print("batch_idx:" + str(batch_idx))
-                rec_val = torch.zeros([100, 512, 16, 16])  # difference model has difference shape
+                rec_val = torch.zeros([100, 256, 8, 8])  # difference model has difference shape
                 dist.recv(tensor=rec_val, src=0)
                 print("after recv....")
-                outputs = layer(rec_val.cuda())
+                outputs = layer(rec_val.cuda(1))
                 dist.send(tensor=outputs.cpu(), dst=2)
                 batch_idx += 1
                 print("send...")
@@ -413,10 +413,10 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             batch_idx = 0
             while data_size > batch_idx:
                 print("batch_idx:" + str(batch_idx))
-                rec_val = torch.zeros([100, 1024, 8, 8])  # difference model has difference shape
+                rec_val = torch.zeros([100, 256, 4, 4])  # difference model has difference shape
                 dist.recv(tensor=rec_val, src=1)
                 print("after recv....")
-                outputs = layer(rec_val.cuda())
+                outputs = layer(rec_val.cuda(2))
                 dist.send(tensor=outputs.cpu(), dst=3)
                 batch_idx += 1
                 print("send...")
@@ -431,10 +431,10 @@ def eval(layer, logger, e, save_event, data_size, testloader):
             global best_acc
 
             for batch_idx, (inputs, targets) in enumerate(testloader):
-                rec_val = torch.zeros([100, 1024, 8, 8])
+                rec_val = torch.zeros([100, 512, 4, 4])
                 dist.recv(tensor=rec_val, src=2)
-                outputs = layer(rec_val.cuda(0))
-                targets = targets.cuda()
+                outputs = layer(rec_val.cuda(3))
+                targets = targets.cuda(3)
                 loss = criterion(outputs, targets)
                 test_loss += loss.item()
                 _, predicted = outputs.max(1)
@@ -468,8 +468,8 @@ def eval(layer, logger, e, save_event, data_size, testloader):
 
 
 def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_event, save_event, train_size, test_size, trainloader, testloader):
-    logger = logging.getLogger(args.model + '-fbp4loss-rank-' + str(dist.get_rank()))
-    file_handler = logging.FileHandler(args.model + '-fbp4loss-rank-' + str(dist.get_rank()) + '.log')
+    logger = logging.getLogger(args.model + '-f4-rank-' + str(dist.get_rank()))
+    file_handler = logging.FileHandler(args.model + '-f4-rank-' + str(dist.get_rank()) + '.log')
     file_handler.setLevel(level=logging.DEBUG)
     formatter = logging.Formatter(fmt='%(message)s', datefmt='%Y/%m/%d %H:%M:%S')
     file_handler.setFormatter(formatter)
@@ -482,19 +482,27 @@ def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_eve
         set_seed(epoch + 1)
         train(layer, logger, shapes, args, epoch_event, train_size, trainloader)
         epoch_event.clear()
-        time.sleep(1)
-        print('Eval epoch: %d' % epoch)
-        eval(layer, logger, epoch_event, save_event, test_size, testloader)
-        epoch_event.clear()
-        if save_event.is_set():
-            print('Saving..')
-            state = {
-                'net': layer.state_dict(),
-                'acc': best_acc,
-                'epoch': 0,
-            }
-            torch.save(state, './checkpoint/' + args.model + '-fbp4loss-rank-' + str(r) + '_ckpt.t7')
-        time.sleep(1)
+        #time.sleep(1)
+        # print('Eval epoch: %d' % epoch)
+        # eval(layer, logger, epoch_event, save_event, test_size, testloader)
+        # epoch_event.clear()
+        # if save_event.is_set():
+        #     print('Saving..')
+        #     state = {
+        #         'net': layer.state_dict(),
+        #         'acc': best_acc,
+        #         'epoch': 0,
+        #     }
+        #     torch.save(state, './checkpoint/' + args.model + '-f4-rank-' + str(r) + '_ckpt.t7')
+        # if r == 1:
+        #     time.sleep(1)
+        #time.sleep(1)
+        if r == 1:
+            time.sleep(1)
+        if r == 2:
+            time.sleep(2)
+        if r == 3:
+            time.sleep(3)
     if r == 0 or r == 1 or r == 2:
         global_event.wait()
     elif r == 3:
@@ -558,32 +566,56 @@ if __name__ == "__main__":
     grad_queue2 = m.get_grad_queue2()
     start_event2 = m.get_start_thread_event2()
 
-    node_cfg_0 = [64, 64, 'M', 128, 128, 'M']
-    node_cfg_1 = [256, 256, 256, 256, 'M']
-    node_cfg_2 = [512, 512, 512, 512, 'M']
-    node_cfg_3 = [512, 512, 512, 512, 'M']
+    # node_cfg_0 = [64, 64, 'M', 128, 128, 'M']
+    # node_cfg_1 = [256, 256, 256, 256, 'M']
+    # node_cfg_2 = [512, 512, 512, 512, 'M']
+    # node_cfg_3 = [512, 512, 512, 512, 'M']
+
+    # node_cfg_0 = [64, 64, 'M', 128, 128, 'M']
+    # node_cfg_1 = [256, 256, 256, 256, 'M', 512]
+    # node_cfg_2 = [512, 512, 512, 'M', 512, ]
+    # node_cfg_3 = [512, 512, 512, 'M']
+    # node_cfg_0 = [64, 64, 'M']
+    # node_cfg_1 = [128, 128, 'M', 256, 256]
+    # node_cfg_2 = [256, 256, 'M', 512, 512]
+    # node_cfg_3 = [512, 512, 'M',512, 512, 512, 512, 'M']
+    # node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256]
+    # node_cfg_1 = [256, 256, 256, 'M']
+    # node_cfg_2 = [512, 512, 512]
+    # node_cfg_3 = [512, 'M', 512, 512, 512, 512, 'M']
+
+    node_cfg_0 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256]
+    node_cfg_1 = [256, 'M', 512, 512,512, 512]
+    node_cfg_2 = ['M', 512, 512]
+    node_cfg_3 = [512, 512, 'M']
     #res50
     #shapes = [[args.batch_size, 256, 32, 32], [args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8]]
     #vgg19
     #shapes = [[args.batch_size, 128, 8, 8], [args.batch_size, 256, 4, 4], [args.batch_size, 512, 2, 2]]
+    #shapes = [[args.batch_size, 128, 8, 8], [args.batch_size, 512, 4, 4], [args.batch_size, 512, 2, 2]]
+    #shapes = [[args.batch_size, 64, 16, 16], [args.batch_size, 256, 8, 8], [args.batch_size, 512, 4, 4]]
+    #shapes = [[args.batch_size, 256, 8, 8], [args.batch_size, 256, 4, 4], [args.batch_size, 512, 4, 4]]
+    #shapes = [[args.batch_size, 256, 8, 8], [args.batch_size,512, 4, 4 ], [args.batch_size,512, 2, 2]]
     #res101
     shapes = [[args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8], [args.batch_size, 1024, 8, 8]]
+    #res34
+    #shapes = [[args.batch_size, 64, 32, 32], [args.batch_size, 128, 16, 16], [args.batch_size, 256, 8, 8]]
     if args.rank == 0:
         layer = THResNet101Group40()
         #layer = VggLayer(node_cfg_0)
-        #layer.cuda()
+        layer.cuda(0)
     elif args.rank == 1:
         layer = THResNet101Group41()
         #layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
-        layer.cuda()
+        layer.cuda(1)
     elif args.rank == 2:
         layer = THResNet101Group42()
         #layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2])
-        layer.cuda()
+        layer.cuda(2)
     elif args.rank == 3:
         layer = THResNet101Group43()
         #layer = VggLayer(node_cfg_3, node_cfg_2[-1] if node_cfg_2[-1] != 'M' else node_cfg_2[-2], last_flag=True)
-        layer.cuda()
+        layer.cuda(3)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     #layer.share_memory()
     cudnn.benchmark = True
@@ -593,7 +625,7 @@ if __name__ == "__main__":
     if args.resume:
         print('==> Resuming from checkpoint..')
         assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-        checkpoint = torch.load('./checkpoint/' + args.model + '-fbp4loss-rank-' + str(args.rank) + '_ckpt.t7')
+        checkpoint = torch.load('./checkpoint/' + args.model + '-f4-rank-' + str(args.rank) + '_ckpt.t7')
         layer.load_state_dict(checkpoint['net'])
         best_acc = checkpoint['acc']
         start_epoch = checkpoint['epoch']

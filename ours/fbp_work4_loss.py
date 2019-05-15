@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import logging
 import time
-from model.res import THResNet101Group40, THResNet101Group41, THResNet101Group42, THResNet101Group43
+from model.res import THResNet101Group40, THResNet101Group41, THResNet101Group42, THResNet101Group43, THResNet50Group40,THResNet50Group41, THResNet50Group42, THResNet50Group43
 from model.vgg_module import VggLayer
 from model.googlenet import GoogleNetGroup0, GoogleNetGroup1, GoogleNetGroup2
 from model.dpn import  THDPNGroup0, THDPNGroup1, THDPNGroup2
@@ -483,18 +483,18 @@ def run(start_epoch, layer, shapes, args, targets_queue, global_event, epoch_eve
         train(layer, logger, shapes, args, epoch_event, train_size, trainloader)
         epoch_event.clear()
         time.sleep(1)
-        print('Eval epoch: %d' % epoch)
-        eval(layer, logger, epoch_event, save_event, test_size, testloader)
-        epoch_event.clear()
-        if save_event.is_set():
-            print('Saving..')
-            state = {
-                'net': layer.state_dict(),
-                'acc': best_acc,
-                'epoch': 0,
-            }
-            torch.save(state, './checkpoint/' + args.model + '-fbp4loss-rank-' + str(r) + '_ckpt.t7')
-        time.sleep(1)
+        # print('Eval epoch: %d' % epoch)
+        # eval(layer, logger, epoch_event, save_event, test_size, testloader)
+        # epoch_event.clear()
+        # if save_event.is_set():
+        #     print('Saving..')
+        #     state = {
+        #         'net': layer.state_dict(),
+        #         'acc': best_acc,
+        #         'epoch': 0,
+        #     }
+        #     torch.save(state, './checkpoint/' + args.model + '-fbp4loss-rank-' + str(r) + '_ckpt.t7')
+        # time.sleep(1)
     if r == 0 or r == 1 or r == 2:
         global_event.wait()
     elif r == 3:
@@ -563,25 +563,29 @@ if __name__ == "__main__":
     node_cfg_2 = [512, 512, 512, 512, 'M']
     node_cfg_3 = [512, 512, 512, 512, 'M']
     #res50
-    #shapes = [[args.batch_size, 256, 32, 32], [args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8]]
+    shapes = [[args.batch_size, 256, 32, 32], [args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8]]
     #vgg19
     #shapes = [[args.batch_size, 128, 8, 8], [args.batch_size, 256, 4, 4], [args.batch_size, 512, 2, 2]]
     #res101
-    shapes = [[args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8], [args.batch_size, 1024, 8, 8]]
+    #shapes = [[args.batch_size, 512, 16, 16], [args.batch_size, 1024, 8, 8], [args.batch_size, 1024, 8, 8]]
     if args.rank == 0:
-        layer = THResNet101Group40()
+        #layer = THResNet101Group40()
+        layer = THResNet50Group40()
         #layer = VggLayer(node_cfg_0)
-        #layer.cuda()
+        layer.cuda()
     elif args.rank == 1:
-        layer = THResNet101Group41()
+        #layer = THResNet101Group41()
         #layer = VggLayer(node_cfg_1, node_cfg_0[-1] if node_cfg_0[-1] != 'M' else node_cfg_0[-2])
+        layer = THResNet50Group41()
         layer.cuda()
     elif args.rank == 2:
-        layer = THResNet101Group42()
+        #layer = THResNet101Group42()
+        layer = THResNet50Group42()
         #layer = VggLayer(node_cfg_2, node_cfg_1[-1] if node_cfg_1[-1] != 'M' else node_cfg_1[-2])
         layer.cuda()
     elif args.rank == 3:
-        layer = THResNet101Group43()
+        #layer = THResNet101Group43()
+        layer = THResNet50Group43()
         #layer = VggLayer(node_cfg_3, node_cfg_2[-1] if node_cfg_2[-1] != 'M' else node_cfg_2[-2], last_flag=True)
         layer.cuda()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
