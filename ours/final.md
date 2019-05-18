@@ -1,19 +1,19 @@
 | method | model | acc | epoch | time | 
  :------: | :------: | :------: |  :------: | :------: |
-| normal | vggnet19 | 91.01 | 124 | ? |
-| normal | googlenet | 87.8 | 143 | ? |
-| normal | resnet18| 92.09 | ? | ? |
-| normal | resnet34 | 92.45 | ? | ? |
-| normal | resnet50 | 92.56 | | |
-| gpipe | vggnet19 | 90.26 | ? | ? |
-| gpipe | googlenet | 92.37 | ? | ?|
-| gpipe | resnet18 | 92.2 | ? | ? |
-| gpipe | resnet34 | 92.38 | ? | ? |
-| gpipe | resnet50 | 92.52| ? | ? |
-| fb-p | vggnet19 | 90.49 | ? | ? |
-| fb-p | googlenet | 89.52  | ? | ? |
-| fb-p | resnet18 | 92.44  | ? | ? |
-| fb-p | resnet34 |  88.02 | ? | ? |
+| normal | vggnet19 | 91.01 | 124 | 1min37 |
+| normal | googlenet | 87.8 | 8min52s | ? |
+| normal | resnet18| 92.09 | 3min2s | ? |
+| normal | resnet34 | 92.45 | 4min20s | ? |
+| normal | resnet50 | 92.56 | 9min13s| |
+| gpipe | vggnet19 | 90.26 | 1min27s | ? |
+| gpipe | googlenet | 92.37 | 6min12s | ?|
+| gpipe | resnet18 | 92.2 | 2min12s/ | ? |
+| gpipe | resnet34 | 92.38 | 2min51s | ? |
+| gpipe | resnet50 | 92.52| 7min5s | ? |
+| fb-p | vggnet19 | 90.49 | 1min29s| 3000-5000 |
+| fb-p | googlenet | 89.52  | 4min40s | ? |
+| fb-p | resnet18 | 92.44  | 2min16s | ? |
+| fb-p | resnet34 |  88.02 | 2min47s | ? |
 | fb-p | resnet50 |  93.04 | 6min10s | ? |
 ***
 | method | model | acc | epoch | time | 
